@@ -1,0 +1,202 @@
+{
+  "actions": [],
+  "autoname": "naming_series:",
+  "creation": "2026-10-16 12:00:00.000000",
+  "doctype": "DocType",
+  "editable_grid": 1,
+  "engine": "InnoDB",
+  "field_order": [
+    "naming_series",
+    "employee",
+    "employee_name",
+    "company",
+    "department",
+    "col_break1",
+    "date",
+    "departure_time",
+    "expected_return_time",
+    "actual_return_time",
+    "total_duration_hours",
+    "sec_break1",
+    "reason",
+    "col_break2",
+    "gate_passes_this_month",
+    "exceeds_policy",
+    "status",
+    "amended_from"
+  ],
+  "fields": [
+    {
+      "fieldname": "naming_series",
+      "fieldtype": "Select",
+      "label": "Series",
+      "options": "GP-.YYYY.-.#####",
+      "reqd": 1,
+      "default": "GP-.YYYY.-.#####"
+    },
+    {
+      "fieldname": "employee",
+      "fieldtype": "Link",
+      "label": "Employee",
+      "options": "Employee",
+      "reqd": 1,
+      "in_list_view": 1,
+      "in_standard_filter": 1
+    },
+    {
+      "fieldname": "employee_name",
+      "fieldtype": "Data",
+      "label": "Employee Name",
+      "fetch_from": "employee.employee_name",
+      "read_only": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "company",
+      "fieldtype": "Link",
+      "label": "Company",
+      "options": "Company",
+      "fetch_from": "employee.company",
+      "read_only": 1
+    },
+    {
+      "fieldname": "department",
+      "fieldtype": "Link",
+      "label": "Department",
+      "options": "Department",
+      "fetch_from": "employee.department",
+      "read_only": 1
+    },
+    {
+      "fieldname": "col_break1",
+      "fieldtype": "Column Break"
+    },
+    {
+      "fieldname": "date",
+      "fieldtype": "Date",
+      "label": "Date",
+      "default": "Today",
+      "reqd": 1,
+      "in_list_view": 1,
+      "in_standard_filter": 1
+    },
+    {
+      "fieldname": "departure_time",
+      "fieldtype": "Time",
+      "label": "Departure Time",
+      "reqd": 1
+    },
+    {
+      "fieldname": "expected_return_time",
+      "fieldtype": "Time",
+      "label": "Expected Return Time",
+      "reqd": 1
+    },
+    {
+      "fieldname": "actual_return_time",
+      "fieldtype": "Time",
+      "label": "Actual Return Time"
+    },
+    {
+      "fieldname": "total_duration_hours",
+      "fieldtype": "Float",
+      "label": "Total Duration (Hours)",
+      "read_only": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "sec_break1",
+      "fieldtype": "Section Break",
+      "label": "Reason & Policy Validation"
+    },
+    {
+      "fieldname": "reason",
+      "fieldtype": "Small Text",
+      "label": "Purpose / Reason",
+      "reqd": 1
+    },
+    {
+      "fieldname": "col_break2",
+      "fieldtype": "Column Break"
+    },
+    {
+      "fieldname": "gate_passes_this_month",
+      "fieldtype": "Int",
+      "label": "Gate Passes Used This Month",
+      "read_only": 1
+    },
+    {
+      "fieldname": "exceeds_policy",
+      "fieldtype": "Check",
+      "label": "Exceeds Policy (Adjusted to Half Day)",
+      "read_only": 1
+    },
+    {
+      "fieldname": "status",
+      "fieldtype": "Select",
+      "label": "Status",
+      "options": "Draft\\nSubmitted\\nAdjusted to Half Day\\nCancelled",
+      "default": "Draft",
+      "read_only": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "amended_from",
+      "fieldtype": "Link",
+      "label": "Amended From",
+      "options": "Employee Gate Pass",
+      "read_only": 1,
+      "no_copy": 1
+    }
+  ],
+  "is_submittable": 1,
+  "links": [],
+  "modified": "2026-10-16 12:00:00.000000",
+  "modified_by": "Administrator",
+  "module": "SIPL HRMS",
+  "name": "Employee Gate Pass",
+  "naming_rule": "By \"Naming Series\" field",
+  "owner": "Administrator",
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "submit": 1,
+      "cancel": 1,
+      "amend": 1
+    },
+    {
+      "role": "HR Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "submit": 1,
+      "cancel": 1,
+      "amend": 1
+    },
+    {
+      "role": "HR User",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "submit": 1,
+      "cancel": 1,
+      "amend": 1
+    },
+    {
+      "role": "Employee",
+      "read": 1,
+      "write": 1,
+      "create": 1
+    }
+  ],
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "states": [],
+  "track_changes": 1
+}
