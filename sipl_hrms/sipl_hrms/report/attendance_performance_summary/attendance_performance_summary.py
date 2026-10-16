@@ -82,8 +82,8 @@ def execute(filters=None):
             rec = att_map.get((emp_id, d_str))
 
             if rec:
-                in_t = formatdate(rec.in_time, "HH:mm") if rec.in_time else ""
-                out_t = formatdate(rec.out_time, "HH:mm") if rec.out_time else ""
+                in_t = str(rec.in_time)[11:16] if rec.in_time else ""
+                out_t = str(rec.out_time)[11:16] if rec.out_time else ""
                 st = "P" if rec.status == "Present" else ("A" if rec.status == "Absent" else ("HD" if rec.status == "Half Day" else rec.status))
                 thrs = str(round(rec.working_hours, 1)) if rec.working_hours else ""
                 
