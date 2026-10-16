@@ -31,9 +31,9 @@ def execute(filters=None):
             "width": 42
         })
 
-    # Summary columns (Matching Image 3)
+    # Summary columns
     columns.extend([
-        {"label": "Total", "fieldname": "total_p", "fieldtype": "Float", "width": 60},
+        {"label": "Actual Present Days", "fieldname": "total_p", "fieldtype": "Float", "width": 135},
         {"label": "WO", "fieldname": "total_wo", "fieldtype": "Int", "width": 45},
         {"label": "H", "fieldname": "total_h", "fieldtype": "Int", "width": 45},
         {"label": "CL", "fieldname": "total_cl", "fieldtype": "Float", "width": 45},
@@ -42,6 +42,15 @@ def execute(filters=None):
         {"label": "C/OFF", "fieldname": "total_coff", "fieldtype": "Float", "width": 55},
         {"label": "G Total", "fieldname": "g_total", "fieldtype": "Float", "width": 65}
     ])
+
+    # Determine cutoff day for counting WO and H for current/past/future months
+    today = getdate()
+    if year == today.year and month == today.month:
+        max_day_to_count = today.day
+    elif (year < today.year) or (year == today.year and month < today.month):
+        max_day_to_count = total_days
+    else:
+        max_day_to_count = 0
 
     # Get active employees
     emp_filters = {"status": "Active"}
@@ -103,6 +112,7 @@ def execute(filters=None):
             d_str = f"{year}-{month:02d}-{day:02d}"
             att = att_map.get((emp.name, d_str))
             cell_code = ""
+            is_sunday = (calendar.weekday(year, month, day) == 6)
 
             if att:
                 st = att.status
@@ -145,14 +155,16 @@ def execute(filters=None):
                     else:
                         cell_code = "L"
             else:
-                # Check holiday / weekly off
+                # Check weekly off (Sunday or holiday list weekly off) or festival holiday
                 h_code = holiday_map.get(d_str)
-                if h_code == "W/O":
+                if is_sunday or h_code == "W/O":
                     cell_code = "W/O"
-                    wo_count += 1
+                    if day <= max_day_to_count:
+                        wo_count += 1
                 elif h_code == "H":
                     cell_code = "H"
-                    h_count += 1
+                    if day <= max_day_to_count:
+                        h_count += 1
                 else:
                     cell_code = ""
 
