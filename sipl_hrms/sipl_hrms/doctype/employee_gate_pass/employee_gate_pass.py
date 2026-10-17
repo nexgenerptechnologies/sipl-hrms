@@ -1,6 +1,6 @@
 import frappe
 from frappe.model.document import Document
-from frappe.utils import getdate, time_diff_in_seconds
+from frappe.utils import getdate, time_diff_in_seconds, get_datetime
 
 class EmployeeGatePass(Document):
     def validate(self):
@@ -8,54 +8,143 @@ class EmployeeGatePass(Document):
         self.validate_monthly_limit()
 
     def calculate_duration(self):
-        end_t = self.actual_return_time or self.expected_return_time
-        if self.departure_time and end_t:
-            diff_secs = time_diff_in_seconds(f"2000-01-01 {end_t}", f"2000-01-01 {self.departure_time}")
-            if diff_secs > 0:
-                self.total_duration_hours = round(diff_secs / 3600.0, 2)
+        if not self.departure_time:
+            self.total_duration_hours = 0.0
+            return
+
+        if self.will_return == "Yes":
+            end_t = self.actual_return_time or self.expected_return_time
+            if end_t:
+                diff_secs = time_diff_in_seconds(f"2000-01-01 {end_t}", f"2000-01-01 {self.departure_time}")
+                self.total_duration_hours = max(0.0, round(diff_secs / 3600.0, 2)) if diff_secs > 0 else 0.0
             else:
                 self.total_duration_hours = 0.0
+        else:
+            # Did not return -> duration away from work until scheduled shift end (18:30:00)
+            diff_secs = time_diff_in_seconds("2000-01-01 18:30:00", f"2000-01-01 {self.departure_time}")
+            self.total_duration_hours = max(0.0, round(diff_secs / 3600.0, 2)) if diff_secs > 0 else 0.0
 
     def validate_monthly_limit(self):
-        """
-        Rules:
-        - Max 2 gate passes per month.
-        - Max 2 hours each.
-        - Exceeding instances adjusted against Half Day.
-        """
         if not self.employee or not self.date:
             return
-            
+
+        # 1. OFFICIAL DUTY: Unlimited, does not count against personal limit
+        if self.gate_pass_type == "Official Duty (OD)":
+            self.gate_passes_this_month = 0
+            self.exceeds_policy = 0
+            self.status = "Official Duty Approved" if self.docstatus == 1 else "Draft"
+            return
+
+        # 2. PERSONAL WORK: Max 2 passes per month, max 2 hours each
         pass_date = getdate(self.date)
         first_day = pass_date.replace(day=1)
-        
-        # Count submitted gate passes in this calendar month
+
         count = frappe.db.count("Employee Gate Pass", {
             "employee": self.employee,
             "date": [">=", first_day],
+            "gate_pass_type": "Personal Work",
             "name": ["!=", self.name or ""],
             "docstatus": 1
         })
         self.gate_passes_this_month = count + 1
-        
-        if (self.gate_passes_this_month > 2) or (self.total_duration_hours > 2.0):
+
+        if self.will_return == "Yes":
+            if (self.gate_passes_this_month > 2) or (self.total_duration_hours > 2.0):
+                self.exceeds_policy = 1
+                self.status = "Adjusted to Half Day"
+            else:
+                self.exceeds_policy = 0
+                self.status = "Submitted" if self.docstatus == 1 else "Draft"
+        else:
+            # Does not return for personal work -> always adjusted against Half Day / Absent
             self.exceeds_policy = 1
             self.status = "Adjusted to Half Day"
-        else:
-            self.exceeds_policy = 0
-            if self.docstatus == 1:
-                self.status = "Submitted"
-            else:
-                self.status = "Draft"
 
     def on_submit(self):
-        if self.exceeds_policy:
-            self.apply_half_day_deduction()
+        self.apply_attendance_integration()
 
-    def apply_half_day_deduction(self):
-        # Adjust attendance on this date to Half Day
-        att = frappe.db.get_value("Attendance", {"employee": self.employee, "attendance_date": self.date, "docstatus": ["!=", 2]}, "name")
-        if att:
-            frappe.db.set_value("Attendance", att, "status", "Half Day")
-            frappe.db.set_value("Attendance", att, "custom_gate_pass_linked", self.name)
-            frappe.msgprint(f"⚠️ Gate Pass exceeds monthly allowance. Attendance for {self.employee_name} on {self.date} marked as Half Day.")
+    def apply_attendance_integration(self):
+        att_name = frappe.db.get_value("Attendance", {
+            "employee": self.employee,
+            "attendance_date": self.date,
+            "docstatus": ["!=", 2]
+        }, "name")
+
+        # -----------------------------------------------------------
+        # CASE 1: OFFICIAL DUTY (OD)
+        # -----------------------------------------------------------
+        if self.gate_pass_type == "Official Duty (OD)":
+            if att_name:
+                frappe.db.set_value("Attendance", att_name, "status", "Present")
+                frappe.db.set_value("Attendance", att_name, "working_hours", 9.0)
+                frappe.db.set_value("Attendance", att_name, "custom_gate_pass_linked", self.name)
+                if self.will_return == "No (Direct to Home)":
+                    frappe.db.set_value("Attendance", att_name, "out_time", f"{self.date} 18:30:00")
+            else:
+                emp = frappe.get_doc("Employee", self.employee)
+                new_att = frappe.new_doc("Attendance")
+                new_att.employee = self.employee
+                new_att.attendance_date = self.date
+                new_att.company = emp.company or "SIMPLE INTEGRAL PVT. LTD."
+                new_att.status = "Present"
+                new_att.shift = "General"
+                new_att.in_time = f"{self.date} 09:30:00"
+                new_att.out_time = f"{self.date} 18:30:00"
+                new_att.working_hours = 9.0
+                new_att.custom_gate_pass_linked = self.name
+                new_att.docstatus = 1
+                new_att.insert(ignore_permissions=True)
+            frappe.msgprint(f"✅ Official Duty Gate Pass applied. {self.employee_name} marked as Present (Full Day) on {self.date}.")
+            return
+
+        # -----------------------------------------------------------
+        # CASE 2: PERSONAL WORK
+        # -----------------------------------------------------------
+        if self.will_return == "No (Direct to Home)":
+            # Early departure - check actual hours worked before leaving
+            in_time_val = None
+            if att_name:
+                in_time_val = frappe.db.get_value("Attendance", att_name, "in_time")
+            if not in_time_val:
+                earliest_ckin = frappe.db.get_value("Employee Checkin", {
+                    "employee": self.employee,
+                    "time": ["between", [f"{self.date} 00:00:00", f"{self.date} 23:59:59"]]
+                }, "time", order_by="time asc")
+                in_time_val = earliest_ckin
+
+            hours_worked = 4.0
+            if in_time_val:
+                dep_dt = f"{self.date} {self.departure_time}"
+                diff = time_diff_in_seconds(dep_dt, in_time_val)
+                if diff > 0:
+                    hours_worked = round(diff / 3600.0, 2)
+
+            status = "Half Day" if hours_worked >= 4.0 else "Absent"
+
+            if att_name:
+                frappe.db.set_value("Attendance", att_name, "status", status)
+                frappe.db.set_value("Attendance", att_name, "working_hours", hours_worked)
+                frappe.db.set_value("Attendance", att_name, "out_time", f"{self.date} {self.departure_time}")
+                frappe.db.set_value("Attendance", att_name, "custom_gate_pass_linked", self.name)
+            else:
+                emp = frappe.get_doc("Employee", self.employee)
+                new_att = frappe.new_doc("Attendance")
+                new_att.employee = self.employee
+                new_att.attendance_date = self.date
+                new_att.company = emp.company or "SIMPLE INTEGRAL PVT. LTD."
+                new_att.status = status
+                new_att.shift = "General"
+                new_att.in_time = in_time_val or f"{self.date} 09:30:00"
+                new_att.out_time = f"{self.date} {self.departure_time}"
+                new_att.working_hours = hours_worked
+                new_att.custom_gate_pass_linked = self.name
+                new_att.docstatus = 1
+                new_att.insert(ignore_permissions=True)
+            frappe.msgprint(f"⚠️ Personal Early Exit Gate Pass applied: {self.employee_name} marked as {status} ({hours_worked} hrs worked).")
+
+        else:
+            # Returns to office, but exceeded 2h or 2-pass monthly limit
+            if self.exceeds_policy and att_name:
+                frappe.db.set_value("Attendance", att_name, "status", "Half Day")
+                frappe.db.set_value("Attendance", att_name, "custom_gate_pass_linked", self.name)
+                frappe.msgprint(f"⚠️ Personal Gate Pass exceeds monthly allowance. Attendance for {self.employee_name} on {self.date} marked as Half Day.")

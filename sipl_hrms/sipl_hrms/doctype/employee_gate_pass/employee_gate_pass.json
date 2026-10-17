@@ -13,6 +13,8 @@
     "department",
     "col_break1",
     "date",
+    "gate_pass_type",
+    "will_return",
     "departure_time",
     "expected_return_time",
     "actual_return_time",
@@ -81,6 +83,25 @@
       "in_standard_filter": 1
     },
     {
+      "fieldname": "gate_pass_type",
+      "fieldtype": "Select",
+      "label": "Gate Pass Type",
+      "options": "Personal Work\nOfficial Duty (OD)",
+      "default": "Personal Work",
+      "reqd": 1,
+      "in_list_view": 1,
+      "in_standard_filter": 1
+    },
+    {
+      "fieldname": "will_return",
+      "fieldtype": "Select",
+      "label": "Will Return to Office?",
+      "options": "Yes\nNo (Direct to Home)",
+      "default": "Yes",
+      "reqd": 1,
+      "in_list_view": 1
+    },
+    {
       "fieldname": "departure_time",
       "fieldtype": "Time",
       "label": "Departure Time",
@@ -90,12 +111,14 @@
       "fieldname": "expected_return_time",
       "fieldtype": "Time",
       "label": "Expected Return Time",
-      "reqd": 1
+      "depends_on": "eval:doc.will_return=='Yes'",
+      "mandatory_depends_on": "eval:doc.will_return=='Yes'"
     },
     {
       "fieldname": "actual_return_time",
       "fieldtype": "Time",
-      "label": "Actual Return Time"
+      "label": "Actual Return Time",
+      "depends_on": "eval:doc.will_return=='Yes'"
     },
     {
       "fieldname": "total_duration_hours",
@@ -122,7 +145,7 @@
     {
       "fieldname": "gate_passes_this_month",
       "fieldtype": "Int",
-      "label": "Gate Passes Used This Month",
+      "label": "Personal Gate Passes Used This Month",
       "read_only": 1
     },
     {
@@ -135,7 +158,7 @@
       "fieldname": "status",
       "fieldtype": "Select",
       "label": "Status",
-      "options": "Draft\\nSubmitted\\nAdjusted to Half Day\\nCancelled",
+      "options": "Draft\nSubmitted\nOfficial Duty Approved\nAdjusted to Half Day\nCancelled",
       "default": "Draft",
       "read_only": 1,
       "in_list_view": 1
@@ -151,7 +174,7 @@
   ],
   "is_submittable": 1,
   "links": [],
-  "modified": "2026-10-16 12:00:00.000000",
+  "modified": "2026-10-17 05:30:00.000000",
   "modified_by": "Administrator",
   "module": "SIPL HRMS",
   "name": "Employee Gate Pass",
