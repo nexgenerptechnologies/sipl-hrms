@@ -57,7 +57,7 @@ frappe.ui.form.on('Employee Gate Pass', {
             );
         } else if (frm.doc.will_return === 'No (Direct to Home)') {
             frm.dashboard.set_headline_alert(
-                __('⚠️ Personal Early Departure: Day will be adjusted to Half Day (if $\\ge 4$ hours worked before leaving) or Absent.'),
+                __('⚠️ Personal Early Departure: Day will be adjusted to Half Day (if 4 or more hours worked before leaving) or Absent.'),
                 'orange'
             );
         } else if (frm.doc.exceeds_policy) {
