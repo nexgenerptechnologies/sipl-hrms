@@ -43,7 +43,12 @@ def execute(filters=None):
     if filters.get("department"): emp_filters["department"] = filters.get("department")
     if filters.get("employee"): emp_filters["name"] = filters.get("employee")
 
-    employees = frappe.get_all("Employee", filters=emp_filters, fields=["name", "employee_name"], order_by="employee_name asc")
+    employees = frappe.get_all(
+        "Employee",
+        filters=emp_filters,
+        fields=["name", "employee_name", "custom_overtime_applicable"],
+        order_by="employee_name asc"
+    )
 
     # Fetch attendance records
     att_filters = {
@@ -67,6 +72,7 @@ def execute(filters=None):
     for emp in employees:
         emp_id = emp.name
         emp_name = emp.employee_name
+        is_ot_applicable = (emp.get("custom_overtime_applicable") == "OT Applicable")
 
         row_in = {"employee": emp_id, "employee_name": emp_name, "metric": "in"}
         row_out = {"employee": "", "employee_name": "", "metric": "out"}
@@ -84,22 +90,38 @@ def execute(filters=None):
             if rec:
                 in_t = str(rec.in_time)[11:16] if rec.in_time else ""
                 out_t = str(rec.out_time)[11:16] if rec.out_time else ""
-                st = "P" if rec.status == "Present" else ("A" if rec.status == "Absent" else ("HD" if rec.status == "Half Day" else rec.status))
+
+                # Distinguish P, A, A/P (late arrival), P/A (early departure)
+                if rec.status == "Present":
+                    st = "P"
+                elif rec.status == "Absent":
+                    st = "A"
+                elif rec.status == "Half Day":
+                    if in_t >= "11:30" or (rec.late_entry and in_t > "10:00"):
+                        st = "A/P"
+                    else:
+                        st = "P/A"
+                else:
+                    st = rec.status
+
                 thrs = str(round(rec.working_hours, 1)) if rec.working_hours else ""
                 
-                # OT calculation per 10h rule
+                # OT calculation strictly for OT Applicable employees only
                 othrs = ""
-                wh = float(rec.working_hours or 0.0)
-                if wh > 10.0:
-                    ot_val = round(wh - 9.0, 1)
-                    othrs = str(ot_val)
-                    ot_total += ot_val
-                elif rec.custom_overtime_hours:
-                    othrs = str(round(rec.custom_overtime_hours, 1))
-                    ot_total += float(rec.custom_overtime_hours)
+                if is_ot_applicable:
+                    wh = float(rec.working_hours or 0.0)
+                    if wh > 10.0:
+                        ot_val = round(wh - 9.0, 1)
+                        othrs = str(ot_val)
+                        ot_total += ot_val
+                    elif rec.custom_overtime_hours:
+                        othrs = str(round(rec.custom_overtime_hours, 1))
+                        ot_total += float(rec.custom_overtime_hours)
 
-                if rec.status == "Present": p_count += 1.0
-                elif rec.status == "Half Day": p_count += 0.5
+                if rec.status == "Present":
+                    p_count += 1.0
+                elif rec.status == "Half Day":
+                    p_count += 0.5
 
                 row_in[d_str] = in_t
                 row_out[d_str] = out_t
@@ -114,7 +136,7 @@ def execute(filters=None):
                 row_othrs[d_str] = ""
 
         row_in["total_p"] = p_count
-        row_othrs["total_ot"] = round(ot_total, 1)
+        row_othrs["total_ot"] = round(ot_total, 1) if is_ot_applicable else 0.0
 
         data.extend([row_in, row_out, row_status, row_thrs, row_othrs])
 
