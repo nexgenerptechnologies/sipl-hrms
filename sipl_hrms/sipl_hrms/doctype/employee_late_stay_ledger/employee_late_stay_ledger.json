@@ -61,14 +61,14 @@
       "fieldname": "status",
       "fieldtype": "Select",
       "label": "Status",
-      "options": "Accumulating\\nCredited to C-Off\\nExpired",
+      "options": "Accumulating\nCredited to C-Off\nExpired",
       "default": "Accumulating",
       "in_list_view": 1,
       "in_standard_filter": 1
     }
   ],
   "links": [],
-  "modified": "2026-10-16 12:00:00.000000",
+  "modified": "2026-10-21 21:26:00.000000",
   "modified_by": "Administrator",
   "module": "SIPL HRMS",
   "name": "Employee Late Stay Ledger",
@@ -94,6 +94,10 @@
       "read": 1,
       "write": 1,
       "create": 1
+    },
+    {
+      "role": "Employee",
+      "read": 1
     }
   ],
   "sort_field": "modified",
