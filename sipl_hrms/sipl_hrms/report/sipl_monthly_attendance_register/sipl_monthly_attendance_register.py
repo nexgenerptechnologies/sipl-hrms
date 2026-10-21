@@ -16,6 +16,7 @@ def execute(filters=None):
     columns = [
         {"label": "S.No.", "fieldname": "s_no", "fieldtype": "Int", "width": 50},
         {"label": "E.Code", "fieldname": "employee", "fieldtype": "Link", "options": "Employee", "width": 110},
+        {"label": "Employee Number", "fieldname": "employee_number", "fieldtype": "Data", "width": 125},
         {"label": "Emp Name", "fieldname": "employee_name", "fieldtype": "Data", "width": 140},
         {"label": "Father's Name", "fieldname": "father_name", "fieldtype": "Data", "width": 130},
         {"label": "Deptt.", "fieldname": "department", "fieldtype": "Link", "options": "Department", "width": 110},
@@ -61,7 +62,7 @@ def execute(filters=None):
     employees = frappe.get_all(
         "Employee",
         filters=emp_filters,
-        fields=["name", "employee_name", "department", "designation", "gender"],
+        fields=["name", "employee_name", "employee_number", "department", "designation", "gender"],
         order_by="name asc"
     )
 
@@ -81,7 +82,7 @@ def execute(filters=None):
             "attendance_date": ["between", [f"{year}-{month:02d}-01", f"{year}-{month:02d}-{total_days:02d}"]],
             "docstatus": ["!=", 2]
         },
-        fields=["employee", "attendance_date", "status", "leave_type"]
+        fields=["employee", "attendance_date", "status", "leave_type", "in_time", "out_time", "working_hours", "late_entry"]
     )
 
     att_map = {(a.employee, str(a.attendance_date)): a for a in attendances}
@@ -93,6 +94,7 @@ def execute(filters=None):
         row = {
             "s_no": s_no,
             "employee": emp.name,
+            "employee_number": emp.employee_number or "",
             "employee_name": emp.employee_name,
             "father_name": "", # can fetch from bio if present
             "department": emp.department or "",
@@ -137,7 +139,16 @@ def execute(filters=None):
                         cell_code = "O"
                         coff_count += 0.5
                     else:
-                        cell_code = "P/A"
+                        # Determine A/P (late arrival / 2nd half present) vs P/A (early exit)
+                        in_t_str = str(att.in_time or "")
+                        if in_t_str and len(in_t_str) >= 16:
+                            t_part = in_t_str[11:16]
+                            if t_part >= "11:30" or (att.late_entry and t_part > "10:00"):
+                                cell_code = "A/P"
+                            else:
+                                cell_code = "P/A"
+                        else:
+                            cell_code = "A/P" if att.late_entry else "P/A"
                     p_days += 0.5
                 elif st == "On Leave":
                     if "CASUAL" in lt or "CL" in lt:
