@@ -4,10 +4,20 @@ from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 def after_install():
     setup_custom_fields()
     setup_leave_types()
+    clean_department_names()
 
 def after_migrate():
     setup_custom_fields()
     setup_leave_types()
+    clean_department_names()
+
+def clean_department_names():
+    # If 'ERP - SIPL' exists, rename cleanly to 'ERP'
+    if frappe.db.exists("Department", "ERP - SIPL"):
+        frappe.db.sql("UPDATE `tabDepartment` SET name = 'ERP' WHERE name = 'ERP - SIPL'")
+        frappe.db.sql("UPDATE `tabEmployee` SET department = 'ERP' WHERE department = 'ERP - SIPL'")
+        frappe.db.commit()
+        frappe.clear_cache(doctype="Department")
 
 def setup_custom_fields():
     custom_fields = {

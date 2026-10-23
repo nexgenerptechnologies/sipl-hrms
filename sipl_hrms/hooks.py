@@ -14,7 +14,14 @@ after_migrate = "sipl_hrms.setup.install.after_migrate"
 doc_events = {
     "Attendance": {
         "before_save": "sipl_hrms.tasks.attendance.process_attendance_rules"
+    },
+    "Department": {
+        "before_insert": "sipl_hrms.overrides.department.before_insert_department"
     }
+}
+
+override_doctype_class = {
+    "Department": "sipl_hrms.overrides.department.CustomDepartment"
 }
 
 # Scheduler Hooks
