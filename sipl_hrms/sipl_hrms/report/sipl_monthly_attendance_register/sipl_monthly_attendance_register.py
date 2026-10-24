@@ -196,27 +196,25 @@ def execute(filters=None):
                 st = att.status
                 lt = (att.leave_type or "").upper()
 
-                if st == "Present":
-                    # Requirement 6: If present on Sunday/Weekly off, display as PWO
-                    if is_sunday or h_code == "W/O":
+                # Requirement 6: If present on Sunday/Weekly off, display as PWO
+                if is_sunday or h_code == "W/O":
+                    if st in ["Present", "Half Day"]:
                         cell_code = "PWO"
+                        p_days += 1.0
+                    elif st == "Absent":
+                        cell_code = "A"
+                        if day <= max_day_to_count:
+                            absent_count += 1
                     else:
-                        cell_code = "P"
+                        cell_code = "PWO"
+                        p_days += 1.0
+                elif st == "Present":
+                    cell_code = "P"
                     p_days += 1.0
-
-                    # Accumulate OT if applicable
-                    if is_ot_applicable:
-                        wh = float(att.working_hours or 0.0)
-                        if wh > 10.0:
-                            total_ot += round(wh - 9.0, 1)
-                        elif att.custom_overtime_hours:
-                            total_ot += float(att.custom_overtime_hours)
-
                 elif st == "Absent":
                     cell_code = "A"
                     if day <= max_day_to_count:
                         absent_count += 1
-
                 elif st == "Half Day":
                     if "CASUAL" in lt or "CL" in lt:
                         cell_code = "C"
@@ -259,6 +257,14 @@ def execute(filters=None):
                         coff_count += 1.0
                     else:
                         cell_code = "L"
+
+                # Accumulate OT if applicable
+                if is_ot_applicable:
+                    wh = float(att.working_hours or 0.0)
+                    if wh > 10.0:
+                        total_ot += round(wh - 9.0, 1)
+                    elif att.custom_overtime_hours:
+                        total_ot += float(att.custom_overtime_hours)
 
             else:
                 # No attendance record exists for this day

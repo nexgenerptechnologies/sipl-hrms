@@ -116,12 +116,17 @@ def execute(filters=None):
                 out_t = str(rec.out_time)[11:16] if rec.out_time else ""
 
                 # Distinguish P, PWO, A, A/P (late arrival), P/A (early departure)
-                if rec.status == "Present":
-                    # Requirement 6 & 12: Sunday presence is marked as PWO
-                    if is_sunday or h_type == "W/O":
+                if is_sunday or h_type == "W/O":
+                    if rec.status in ["Present", "Half Day"]:
                         st = "PWO"
+                        p_count += 1.0
+                    elif rec.status == "Absent":
+                        st = "A"
                     else:
-                        st = "P"
+                        st = "PWO"
+                        p_count += 1.0
+                elif rec.status == "Present":
+                    st = "P"
                     p_count += 1.0
                 elif rec.status == "Absent":
                     st = "A"
