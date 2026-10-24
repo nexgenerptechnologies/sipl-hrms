@@ -42,7 +42,17 @@ def process_attendance_rules(doc, method=None):
     # ----------------------------------------------------
     # 2. LATE COMING & GATE PASS POLICY
     # ----------------------------------------------------
-    if doc.in_time:
+    att_date = getdate(doc.attendance_date)
+    is_sunday = (att_date.weekday() == 6)
+
+    if is_sunday:
+        doc.late_entry = 0
+        doc.custom_late_minutes = 0
+        if working_hours >= 4.0:
+            doc.status = "Present"
+        elif working_hours > 0.0:
+            doc.status = "Half Day"
+    elif doc.in_time:
         in_dt = get_datetime(doc.in_time)
         shift_start_dt = get_datetime(f"{doc.attendance_date} 09:30:00")
         
@@ -52,7 +62,6 @@ def process_attendance_rules(doc, method=None):
             doc.custom_late_minutes = late_mins
             doc.late_entry = 1
             
-            att_date = getdate(doc.attendance_date)
             first_day_of_month = att_date.replace(day=1)
             
             # Count prior late arrivals this month
@@ -98,12 +107,13 @@ def process_attendance_rules(doc, method=None):
             doc.custom_late_minutes = 0
             doc.late_entry = 0
 
-    # Ensure status is at least Half Day if working hours between 4.0 and 7.5
-    if working_hours < 7.5 and working_hours >= 4.0:
-        if doc.status == "Present":
-            doc.status = "Half Day"
-    elif working_hours < 4.0 and working_hours > 0:
-        doc.status = "Absent"
+    if not is_sunday:
+        # Ensure status is at least Half Day if working hours between 4.0 and 7.5
+        if working_hours < 7.5 and working_hours >= 4.0:
+            if doc.status == "Present":
+                doc.status = "Half Day"
+        elif working_hours < 4.0 and working_hours > 0:
+            doc.status = "Absent"
 
 def accumulate_late_stay_c_off(att_doc):
     """
