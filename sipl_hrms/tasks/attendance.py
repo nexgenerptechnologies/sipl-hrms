@@ -19,39 +19,50 @@ def process_attendance_rules(doc, method=None):
     working_hours = float(doc.working_hours or 0.0)
     ot_applicable = frappe.db.get_value("Employee", doc.employee, "custom_overtime_applicable")
     
+    att_date = getdate(doc.attendance_date)
+    is_sunday = (att_date.weekday() == 6)
+
     # ----------------------------------------------------
     # 1. OVERTIME vs CPL (LATE STAY)
     # ----------------------------------------------------
     if ot_applicable == "OT Applicable":
         doc.custom_late_stay_hours = 0.0
-        # OT Rule: Calculated after completing 10 hours in a day (working_hours - 9.0)
+        # OT Rule: Option A - OT is calculated only for hours beyond 10.0 hours
         if working_hours > 10.0:
-            doc.custom_overtime_hours = round(working_hours - 9.0, 2)
+            doc.custom_overtime_hours = round(working_hours - 10.0, 2)
         else:
             doc.custom_overtime_hours = 0.0
     else:
-        # OT Not Applicable -> Extra hours accumulate towards CPL (Compensatory Off)
+        # OT Not Applicable -> Extra stay beyond 18:30 counts towards CPL only if >= 2.0 hours
         doc.custom_overtime_hours = 0.0
-        if working_hours > 9.0:
-            extra_h = round(working_hours - 9.0, 2)
-            doc.custom_late_stay_hours = min(extra_h, 7.0)
-            accumulate_late_stay_c_off(doc)
+        if not is_sunday and doc.out_time:
+            out_dt = get_datetime(doc.out_time)
+            shift_end_dt = get_datetime(f"{doc.attendance_date} 18:30:00")
+            if out_dt > shift_end_dt:
+                diff_secs = time_diff_in_seconds(out_dt, shift_end_dt)
+                extra_stay_h = round(diff_secs / 3600.0, 2)
+                if extra_stay_h >= 2.0:
+                    doc.custom_late_stay_hours = extra_stay_h
+                    accumulate_late_stay_c_off(doc)
+                else:
+                    doc.custom_late_stay_hours = 0.0
+            else:
+                doc.custom_late_stay_hours = 0.0
         else:
             doc.custom_late_stay_hours = 0.0
 
     # ----------------------------------------------------
     # 2. LATE COMING & GATE PASS POLICY
     # ----------------------------------------------------
-    att_date = getdate(doc.attendance_date)
-    is_sunday = (att_date.weekday() == 6)
-
     if is_sunday:
         doc.late_entry = 0
         doc.custom_late_minutes = 0
-        if working_hours >= 4.0:
+        if working_hours >= 3.5:
             doc.status = "Present"
         elif working_hours > 0.0:
             doc.status = "Half Day"
+        else:
+            doc.status = "Absent"
     elif doc.in_time:
         in_dt = get_datetime(doc.in_time)
         shift_start_dt = get_datetime(f"{doc.attendance_date} 09:30:00")
@@ -84,33 +95,35 @@ def process_attendance_rules(doc, method=None):
                 doc.custom_gate_pass_linked = gate_pass.name
 
             # Evaluate Policy:
-            # Case A: Arriving after 11:30 AM (late_mins > 120)
-            # Gate pass is max 2 hours (09:30 - 11:30). Arriving after 11:30 AM means 1st half was missed -> Half Day (A/P)
+            # Case A: Arriving after 11:30 AM (late_mins > 120) -> Half Day (A/P)
             if late_mins > 120:
-                if doc.status == "Present":
-                    doc.status = "Half Day"
+                doc.status = "Half Day"
                     
             # Case B: Arriving between 10:00 AM and 11:30 AM (30 < late_mins <= 120)
             elif late_mins > 30:
                 has_valid_gp = (gate_pass and not gate_pass.exceeds_policy and float(gate_pass.total_duration_hours or 0.0) <= 2.0)
-                if not has_valid_gp:
-                    if doc.status == "Present":
-                        doc.status = "Half Day"
+                if not has_valid_gp and prior_late_count >= 2:
+                    doc.status = "Half Day"
+                else:
+                    doc.status = "Present"
                         
             # Case C: Arriving between 09:30 AM and 10:00 AM (late_mins <= 30)
             else:
-                # 3rd late entry onwards without gate pass -> Half Day
+                # 3rd late entry onwards -> Half Day
                 if prior_late_count >= 2 and not gate_pass:
-                    if doc.status == "Present":
-                        doc.status = "Half Day"
+                    doc.status = "Half Day"
+                else:
+                    doc.status = "Present"
         else:
             doc.custom_late_minutes = 0
             doc.late_entry = 0
 
     if not is_sunday:
-        # Ensure status is at least Half Day if working hours between 4.0 and 7.5
-        if working_hours < 7.5 and working_hours >= 4.0:
-            if doc.status == "Present":
+        # Item 12: Missing punch check on working days
+        if not doc.in_time or not doc.out_time:
+            doc.status = "Absent"
+        elif working_hours < 7.5 and working_hours >= 4.0:
+            if doc.status == "Present" and (not doc.custom_gate_pass_linked and (doc.custom_late_minutes or 0) <= 30):
                 doc.status = "Half Day"
         elif working_hours < 4.0 and working_hours > 0:
             doc.status = "Absent"

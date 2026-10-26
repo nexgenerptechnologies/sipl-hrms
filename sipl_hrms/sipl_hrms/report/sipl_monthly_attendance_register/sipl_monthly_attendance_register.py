@@ -1,5 +1,6 @@
 import frappe
 from frappe.utils import getdate, formatdate, add_days
+from datetime import datetime
 import calendar
 import re
 
@@ -37,7 +38,7 @@ def execute(filters=None):
     columns.extend([
         {"label": "Actual Present Days", "fieldname": "total_p", "fieldtype": "Float", "width": 135},
         {"label": "WO", "fieldname": "total_wo", "fieldtype": "Int", "width": 45},
-        {"label": "H", "fieldname": "total_h", "fieldtype": "Int", "width": 45},
+        {"label": "H/D", "fieldname": "total_h", "fieldtype": "Int", "width": 45},
         {"label": "CL", "fieldname": "total_cl", "fieldtype": "Float", "width": 45},
         {"label": "SL", "fieldname": "total_sl", "fieldtype": "Float", "width": 45},
         {"label": "EL", "fieldname": "total_el", "fieldtype": "Float", "width": 45},
@@ -71,7 +72,7 @@ def execute(filters=None):
         ]
     )
 
-    # Requirement 2: Order employee list according to Employee Number (natural sort)
+    # Order according to Employee Number (natural sort)
     def natural_sort_key(emp):
         emp_num = emp.get("employee_number") or ""
         digits = re.findall(r'\d+', emp_num)
@@ -87,14 +88,15 @@ def execute(filters=None):
         "holiday_date": ["between", [f"{year}-{month:02d}-01", f"{year}-{month:02d}-{total_days:02d}"]]
     }, fields=["holiday_date", "weekly_off"])
 
-    holiday_map = {str(h.holiday_date): ("W/O" if h.weekly_off else "H") for h in holidays}
+    # Item 5: Use H/D instead of H
+    holiday_map = {str(h.holiday_date): ("W/O" if h.weekly_off else "H/D") for h in holidays}
 
     # Helper: Check if a given day is a scheduled off-day (Sunday or holiday)
     def is_day_off(d_num):
         d_str_check = f"{year}-{month:02d}-{d_num:02d}"
         is_sun = (calendar.weekday(year, month, d_num) == 6)
         h_val = holiday_map.get(d_str_check)
-        return is_sun or (h_val in ["W/O", "H"])
+        return is_sun or (h_val in ["W/O", "H/D"])
 
     # Fetch Attendance records for the month
     attendances = frappe.get_all(
@@ -117,7 +119,6 @@ def execute(filters=None):
     for emp in employees:
         is_ot_applicable = (emp.get("custom_overtime_applicable") == "OT Applicable")
 
-        # Requirement 5: Display Father's Name from custom_fathers_name
         row = {
             "s_no": s_no,
             "employee": emp.name,
@@ -139,10 +140,13 @@ def execute(filters=None):
         absent_count = 0
         total_ot = 0.0
 
-        # Helper to check if an employee is qualified (Present or approved EL) on a specific day
+        # State tracking for gate pass & late grace
+        gate_pass_used = 0
+        late_grace_used = 0
+
+        # Helper to check if an employee is qualified (Present or ANY leave) on a specific day (Item 15)
         def is_qualified(d_num):
             if d_num < 1 or d_num > total_days:
-                # Query adjacent month if necessary
                 check_d = getdate(f"{year}-{month:02d}-01")
                 if d_num < 1:
                     adj_date = add_days(check_d, d_num - 1)
@@ -154,31 +158,23 @@ def execute(filters=None):
                     "docstatus": ["!=", 2]
                 }, ["status", "leave_type"], as_dict=True)
                 if rec_adj:
-                    st_adj = rec_adj.status
-                    lt_adj = (rec_adj.leave_type or "").upper()
-                    if st_adj in ["Present", "Half Day"]: return True
-                    if st_adj == "On Leave" and ("EARNED" in lt_adj or "PRIVILEGE" in lt_adj or "EL" in lt_adj): return True
+                    if rec_adj.status in ["Present", "Half Day"] or rec_adj.leave_type:
+                        return True
                 return False
 
             d_s = f"{year}-{month:02d}-{d_num:02d}"
             rec = att_map.get((emp.name, d_s))
             if rec:
-                st_val = rec.status
-                lt_val = (rec.leave_type or "").upper()
-                if st_val in ["Present", "Half Day"]:
-                    return True
-                if st_val == "On Leave" and ("EARNED" in lt_val or "PRIVILEGE" in lt_val or "EL" in lt_val):
+                if rec.status in ["Present", "Half Day"] or rec.leave_type:
                     return True
             return False
 
-        # Helper for Sandwich Rule: find nearest preceding working day
         def get_prev_working_day(d_num):
             cur = d_num - 1
             while cur >= 1 and is_day_off(cur):
                 cur -= 1
             return cur
 
-        # Helper for Sandwich Rule: find nearest following working day
         def get_next_working_day(d_num):
             cur = d_num + 1
             while cur <= total_days and is_day_off(cur):
@@ -192,57 +188,70 @@ def execute(filters=None):
             is_sunday = (calendar.weekday(year, month, day) == 6)
             h_code = holiday_map.get(d_str)
 
-            if att:
-                st = att.status
-                lt = (att.leave_type or "").upper()
+            has_in = bool(att and att.in_time)
+            has_out = bool(att and att.out_time)
 
-                # Requirement 6: If present on Sunday/Weekly off, display as PWO
+            # -------------------------------------------------------------
+            # MISSING PUNCH LOGIC (Items 12 & 13)
+            # -------------------------------------------------------------
+            if has_in != has_out:
+                # Single punch
                 if is_sunday or h_code == "W/O":
-                    if st in ["Present", "Half Day"]:
-                        cell_code = "PWO"
-                        p_days += 1.0
-                    elif st == "Absent":
+                    cell_code = "W/O" # Item 13: Single punch on Sunday shows W/O
+                    if day <= max_day_to_count:
+                        wo_count += 1
+                elif h_code == "H/D":
+                    cell_code = "H/D"
+                    if day <= max_day_to_count:
+                        h_count += 1
+                else:
+                    cell_code = "A"   # Item 12: Single punch on working day shows A
+                    if day <= max_day_to_count:
+                        absent_count += 1
+
+            elif not has_in and not has_out:
+                # No attendance / punch for this day
+                is_wo = (is_sunday or h_code == "W/O")
+                is_hol = (h_code == "H/D")
+
+                if is_wo or is_hol:
+                    # Item 15: Sandwich rule check
+                    prev_w_day = get_prev_working_day(day)
+                    next_w_day = get_next_working_day(day)
+
+                    is_sandwich_eligible = is_qualified(prev_w_day) or is_qualified(next_w_day)
+
+                    if is_sandwich_eligible:
+                        if is_wo:
+                            cell_code = "W/O"
+                            if day <= max_day_to_count:
+                                wo_count += 1
+                        else:
+                            cell_code = "H/D"
+                            if day <= max_day_to_count:
+                                h_count += 1
+                    else:
                         cell_code = "A"
                         if day <= max_day_to_count:
                             absent_count += 1
-                    else:
-                        cell_code = "PWO"
-                        p_days += 1.0
-                elif st == "Present":
-                    cell_code = "P"
-                    p_days += 1.0
-                elif st == "Absent":
-                    cell_code = "A"
-                    if day <= max_day_to_count:
+                else:
+                    cell_code = "A" if day <= max_day_to_count else ""
+                    if cell_code == "A":
                         absent_count += 1
-                elif st == "Half Day":
-                    if "CASUAL" in lt or "CL" in lt:
-                        cell_code = "C"
-                        cl_count += 0.5
-                    elif "SICK" in lt or "SL" in lt:
-                        cell_code = "S"
-                        sl_count += 0.5
-                    elif "EARNED" in lt or "PRIVILEGE" in lt or "EL" in lt:
-                        cell_code = "E"
-                        el_count += 0.5
-                    elif "COMPENSATORY" in lt or "CO" in lt or "C-OFF" in lt:
-                        cell_code = "O"
-                        coff_count += 0.5
-                    else:
-                        # Determine A/P (late arrival / 2nd half present) vs P/A (early exit)
-                        in_t_str = str(att.in_time or "")
-                        if in_t_str and len(in_t_str) >= 16:
-                            t_part = in_t_str[11:16]
-                            if t_part >= "11:30" or (att.late_entry and t_part > "10:00"):
-                                cell_code = "A/P"
-                            else:
-                                cell_code = "P/A"
-                        else:
-                            cell_code = "A/P" if att.late_entry else "P/A"
 
-                    p_days += 0.5
+            else:
+                # Both Check In and Check Out exist!
+                wh = float(att.working_hours or 0.0)
+                in_t = str(att.in_time)[11:16]
+                out_t = str(att.out_time)[11:16]
+                lt = (att.leave_type or "").upper()
 
-                elif st == "On Leave":
+                if is_sunday or h_code == "W/O":
+                    # Sunday Presence (Item 6 & 7)
+                    cell_code = "PWO"
+                    p_days += 1.0
+
+                elif att.status == "On Leave":
                     if "CASUAL" in lt or "CL" in lt:
                         cell_code = "CL"
                         cl_count += 1.0
@@ -258,44 +267,55 @@ def execute(filters=None):
                     else:
                         cell_code = "L"
 
-                # Accumulate OT if applicable
-                if is_ot_applicable:
-                    wh = float(att.working_hours or 0.0)
-                    if wh > 10.0:
-                        total_ot += round(wh - 9.0, 1)
-                    elif att.custom_overtime_hours:
-                        total_ot += float(att.custom_overtime_hours)
-
-            else:
-                # No attendance record exists for this day
-                is_wo = (is_sunday or h_code == "W/O")
-                is_hol = (h_code == "H")
-
-                if is_wo or is_hol:
-                    # Requirement 4: Sandwich Rule check
-                    # Eligible only if present or approved EL on preceding OR following working day
-                    prev_w_day = get_prev_working_day(day)
-                    next_w_day = get_next_working_day(day)
-
-                    is_sandwich_eligible = is_qualified(prev_w_day) or is_qualified(next_w_day)
-
-                    if is_sandwich_eligible:
-                        if is_wo:
-                            cell_code = "W/O"
-                            if day <= max_day_to_count:
-                                wo_count += 1
+                else:
+                    # Working day logic (Items 1, 8, 9)
+                    if in_t > "09:30":
+                        if in_t <= "10:00":
+                            late_grace_used += 1
+                            if late_grace_used <= 2:
+                                cell_code = "P"
+                                p_days += 1.0
+                            else:
+                                cell_code = "A/P"
+                                p_days += 0.5
+                        elif in_t <= "11:30":
+                            if gate_pass_used < 2:
+                                gate_pass_used += 1
+                                cell_code = "P" # Items 1 & 8: 1st & 2nd gate pass allowed -> P
+                                p_days += 1.0
+                            else:
+                                cell_code = "A/P" # Item 9: after 2 gate passes -> A/P
+                                p_days += 0.5
                         else:
-                            cell_code = "H"
-                            if day <= max_day_to_count:
-                                h_count += 1
+                            # Arrived after 11:30 AM
+                            cell_code = "A/P"
+                            p_days += 0.5
                     else:
-                        # Sandwich rule: absent on both preceding & following working days
-                        # Treated as Absent / Loss of Pay
+                        # On-time arrival
+                        cell_code = "P"
+                        p_days += 1.0
+
+                    # Check early departure
+                    if out_t < "18:30" and wh < 8.5:
+                        if cell_code == "P":
+                            if gate_pass_used < 2:
+                                gate_pass_used += 1
+                                cell_code = "P"
+                            else:
+                                cell_code = "P/A"
+                                p_days -= 0.5
+
+                    # Working hours check
+                    if wh < 4.0 and wh > 0:
                         cell_code = "A"
+                        p_days = max(0.0, p_days - 1.0)
                         if day <= max_day_to_count:
                             absent_count += 1
-                else:
-                    cell_code = ""
+
+                # OT Calculation (Item 16: Option A)
+                if is_ot_applicable:
+                    if wh > 10.0:
+                        total_ot += round(wh - 10.0, 1)
 
             row[f"day_{day}"] = cell_code
 
@@ -308,9 +328,7 @@ def execute(filters=None):
         row["total_coff"] = coff_count
         row["g_total"] = p_days + wo_count + h_count + cl_count + sl_count + el_count + coff_count
 
-        # Requirement 7: Total OT and ₹2,000 Attendance Bonus
         row["total_ot"] = round(total_ot, 1) if is_ot_applicable else 0.0
-        # ₹2,000 Attendance Bonus is awarded for full attendance (0 absent days)
         row["attendance_bonus"] = 2000.0 if (p_days > 0 and absent_count == 0) else 0.0
 
         data.append(row)

@@ -5,11 +5,13 @@ def after_install():
     setup_custom_fields()
     setup_leave_types()
     clean_department_names()
+    setup_property_setters()
 
 def after_migrate():
     setup_custom_fields()
     setup_leave_types()
     clean_department_names()
+    setup_property_setters()
 
 def clean_department_names():
     # If 'ERP - SIPL' exists, rename cleanly to 'ERP'
@@ -77,3 +79,29 @@ def setup_leave_types():
             doc.is_compensatory = lt["is_compensatory"]
             doc.insert(ignore_permissions=True)
             frappe.db.commit()
+
+def setup_property_setters():
+    """
+    Enables allow_on_submit on key Attendance fields so HR Manager can edit
+    back-dated and current-dated submitted attendance records without errors.
+    """
+    fields_to_allow = [
+        'status', 'in_time', 'out_time', 'working_hours',
+        'late_entry', 'early_exit', 'custom_late_minutes',
+        'custom_overtime_hours', 'custom_late_stay_hours', 'custom_gate_pass_linked'
+    ]
+    for field in fields_to_allow:
+        ps_name = f"Attendance-{field}-allow_on_submit"
+        if not frappe.db.exists("Property Setter", ps_name):
+            ps = frappe.new_doc("Property Setter")
+            ps.name = ps_name
+            ps.doc_type = "Attendance"
+            ps.field_name = field
+            ps.property = "allow_on_submit"
+            ps.property_type = "Check"
+            ps.value = "1"
+            ps.doctype_or_field = "DocField"
+            ps.insert(ignore_permissions=True)
+        else:
+            frappe.db.set_value("Property Setter", ps_name, "value", "1")
+    frappe.clear_cache(doctype="Attendance")
