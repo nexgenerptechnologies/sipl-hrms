@@ -211,61 +211,56 @@ def execute(filters=None):
                     # ---------------------------------------------------------
                     # WORKING DAY ATTENDANCE, GATE PASS & LATE COMING (Items 1, 8, 9)
                     # ---------------------------------------------------------
-                    is_late_entry = (in_val > "09:30")
+                    if wh < 4.0 and wh > 0:
+                        st_val = "A"
+                    else:
+                        is_late_entry = (in_val > "09:30")
 
-                    if is_late_entry:
-                        if in_val <= "10:00":
-                            # Late Coming grace period (up to 30 mins)
-                            late_grace_used += 1
-                            late_val = "1"
-                            tot_late_count += 1
-                            if late_grace_used <= 2:
-                                st_val = "P"
-                                p_count += 1.0
+                        if is_late_entry:
+                            if in_val <= "10:00":
+                                # Late Coming grace period (up to 30 mins)
+                                late_grace_used += 1
+                                late_val = "1"
+                                tot_late_count += 1
+                                if late_grace_used <= 2:
+                                    st_val = "P"
+                                    p_count += 1.0
+                                else:
+                                    st_val = "A/P"
+                                    p_count += 0.5
+
+                            elif in_val <= "11:30":
+                                # Gate pass allowance window (30 mins to 2 hours)
+                                if gate_pass_used < 2:
+                                    gate_pass_used += 1
+                                    gp_val = "1"
+                                    tot_gp_count += 1
+                                    st_val = "P" # Items 1 & 8: 1st & 2nd gate pass allowed -> P
+                                    p_count += 1.0
+                                else:
+                                    st_val = "A/P" # Item 9: after 2 gate passes -> A/P
+                                    p_count += 0.5
                             else:
+                                # Arrived after 11:30 AM
                                 st_val = "A/P"
                                 p_count += 0.5
 
-                        elif in_val <= "11:30":
-                            # Gate pass allowance window (30 mins to 2 hours)
-                            if gate_pass_used < 2:
-                                gate_pass_used += 1
-                                gp_val = "1"
-                                tot_gp_count += 1
-                                st_val = "P" # Items 1 & 8: 1st & 2nd gate pass allowed -> P
-                                p_count += 1.0
-                            else:
-                                st_val = "A/P" # Item 9: after 2 gate passes -> A/P
-                                p_count += 0.5
                         else:
-                            # Arrived after 11:30 AM
-                            st_val = "A/P"
-                            p_count += 0.5
+                            # On-time arrival
+                            st_val = "P"
+                            p_count += 1.0
 
-                    else:
-                        # On-time arrival
-                        st_val = "P"
-                        p_count += 1.0
-
-                    # Check early departure before 18:30 (Item 9)
-                    if out_val and out_val < "18:30" and wh < 8.5:
-                        if st_val == "P":
-                            if gate_pass_used < 2:
-                                gate_pass_used += 1
-                                gp_val = "1"
-                                tot_gp_count += 1
-                                st_val = "P"
-                            else:
-                                st_val = "P/A"
-                                p_count -= 0.5 # adjusted to half day
-
-                    # Hours check
-                    if wh < 4.0 and wh > 0:
-                        st_val = "A"
-                        p_count = max(0.0, p_count - 1.0)
-                    elif wh < 7.5 and st_val == "P" and not gp_val:
-                        st_val = "Half Day"
-                        p_count -= 0.5
+                        # Check early departure before 18:30 (Item 9)
+                        if out_val and out_val < "18:30" and wh < 8.5:
+                            if st_val == "P":
+                                if gate_pass_used < 2:
+                                    gate_pass_used += 1
+                                    gp_val = "1"
+                                    tot_gp_count += 1
+                                    st_val = "P"
+                                else:
+                                    st_val = "P/A"
+                                    p_count -= 0.5 # adjusted to half day
 
                     # ---------------------------------------------------------
                     # OVERTIME (Item 16: Option A)

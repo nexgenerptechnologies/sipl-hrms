@@ -274,48 +274,46 @@ def execute(filters=None):
 
                 else:
                     # Working day logic (Items 1, 8, 9)
-                    if in_t > "09:30":
-                        if in_t <= "10:00":
-                            late_grace_used += 1
-                            if late_grace_used <= 2:
-                                cell_code = "P"
-                                p_days += 1.0
-                            else:
-                                cell_code = "A/P"
-                                p_days += 0.5
-                        elif in_t <= "11:30":
-                            if gate_pass_used < 2:
-                                gate_pass_used += 1
-                                cell_code = "P" # Items 1 & 8: 1st & 2nd gate pass allowed -> P
-                                p_days += 1.0
-                            else:
-                                cell_code = "A/P" # Item 9: after 2 gate passes -> A/P
-                                p_days += 0.5
-                        else:
-                            # Arrived after 11:30 AM
-                            cell_code = "A/P"
-                            p_days += 0.5
-                    else:
-                        # On-time arrival
-                        cell_code = "P"
-                        p_days += 1.0
-
-                    # Check early departure
-                    if out_t < "18:30" and wh < 8.5:
-                        if cell_code == "P":
-                            if gate_pass_used < 2:
-                                gate_pass_used += 1
-                                cell_code = "P"
-                            else:
-                                cell_code = "P/A"
-                                p_days -= 0.5
-
-                    # Working hours check
                     if wh < 4.0 and wh > 0:
                         cell_code = "A"
-                        p_days = max(0.0, p_days - 1.0)
                         if day <= max_day_to_count:
                             absent_count += 1
+                    else:
+                        if in_t > "09:30":
+                            if in_t <= "10:00":
+                                late_grace_used += 1
+                                if late_grace_used <= 2:
+                                    cell_code = "P"
+                                    p_days += 1.0
+                                else:
+                                    cell_code = "A/P"
+                                    p_days += 0.5
+                            elif in_t <= "11:30":
+                                if gate_pass_used < 2:
+                                    gate_pass_used += 1
+                                    cell_code = "P" # Items 1 & 8: 1st & 2nd gate pass allowed -> P
+                                    p_days += 1.0
+                                else:
+                                    cell_code = "A/P" # Item 9: after 2 gate passes -> A/P
+                                    p_days += 0.5
+                            else:
+                                # Arrived after 11:30 AM
+                                cell_code = "A/P"
+                                p_days += 0.5
+                        else:
+                            # On-time arrival
+                            cell_code = "P"
+                            p_days += 1.0
+
+                        # Check early departure
+                        if out_t < "18:30" and wh < 8.5:
+                            if cell_code == "P":
+                                if gate_pass_used < 2:
+                                    gate_pass_used += 1
+                                    cell_code = "P"
+                                else:
+                                    cell_code = "P/A"
+                                    p_days -= 0.5
 
                 # OT Calculation (Item 16: Option A)
                 if is_ot_applicable:
@@ -331,7 +329,8 @@ def execute(filters=None):
         row["total_sl"] = sl_count
         row["total_el"] = el_count
         row["total_coff"] = coff_count
-        row["g_total"] = p_days + wo_count + h_count + cl_count + sl_count + el_count + coff_count
+        # CPL is a credited leave balance, not added to current month's regular G. Total
+        row["g_total"] = p_days + wo_count + h_count + cl_count + sl_count + el_count
 
         row["total_ot"] = round(total_ot, 1) if is_ot_applicable else 0.0
         row["attendance_bonus"] = 2000.0 if (p_days > 0 and absent_count == 0) else 0.0
