@@ -214,22 +214,22 @@ def execute(filters=None):
                 is_wo = (is_sunday or h_code == "W/O")
                 is_hol = (h_code == "H/D")
 
-                if is_wo or is_hol:
-                    # Item 15: Sandwich rule check
+                if is_wo:
+                    # Weekly Off on Sunday (e.g. Day 18, Day 25)
+                    cell_code = "W/O"
+                    if day <= max_day_to_count:
+                        wo_count += 1
+                elif is_hol:
+                    # Item 15: Sandwich rule check for Holiday (e.g. 2nd Oct)
                     prev_w_day = get_prev_working_day(day)
                     next_w_day = get_next_working_day(day)
 
                     is_sandwich_eligible = is_qualified(prev_w_day) or is_qualified(next_w_day)
 
                     if is_sandwich_eligible:
-                        if is_wo:
-                            cell_code = "W/O"
-                            if day <= max_day_to_count:
-                                wo_count += 1
-                        else:
-                            cell_code = "H/D"
-                            if day <= max_day_to_count:
-                                h_count += 1
+                        cell_code = "H/D"
+                        if day <= max_day_to_count:
+                            h_count += 1
                     else:
                         cell_code = "A"
                         if day <= max_day_to_count:
@@ -247,9 +247,14 @@ def execute(filters=None):
                 lt = (att.leave_type or "").upper()
 
                 if is_sunday or h_code == "W/O":
-                    # Sunday Presence (Item 6 & 7)
+                    # Sunday Presence (Items 6 & 7)
+                    # Status displays as PWO; compensation is credited to CPL (C/OFF column)
                     cell_code = "PWO"
-                    p_days += 1.0
+                    if wh >= 7.0:
+                        coff_count += 1.0
+                    elif wh > 3.5:
+                        coff_count += 0.5
+                    # Note: Sunday work is not counted in regular shift p_days (Actual Present Days)
 
                 elif att.status == "On Leave":
                     if "CASUAL" in lt or "CL" in lt:

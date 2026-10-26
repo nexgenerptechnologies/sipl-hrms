@@ -194,7 +194,6 @@ def execute(filters=None):
                     # SUNDAY ATTENDANCE & CPL (Items 7 & 11)
                     # ---------------------------------------------------------
                     st_val = "PWO"
-                    p_count += 1.0
 
                     if wh >= 7.0:
                         cpl_val = "1"
@@ -206,6 +205,7 @@ def execute(filters=None):
                         cpl_val = ""
 
                     cpl_hrs_val = "" # On Sunday CPL hours should not show
+                    # Sunday presence is credited as CPL, not added to regular shift p_count
 
                 else:
                     # ---------------------------------------------------------
