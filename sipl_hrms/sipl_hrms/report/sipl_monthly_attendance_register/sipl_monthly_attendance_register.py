@@ -99,10 +99,13 @@ def execute(filters=None):
         return is_sun or (h_val in ["W/O", "H/D"])
 
     # Fetch Attendance records for the month
+    from_d = f"{year}-{month:02d}-01"
+    to_d = f"{year}-{month:02d}-{total_days:02d}"
+
     attendances = frappe.get_all(
         "Attendance",
         filters={
-            "attendance_date": ["between", [f"{year}-{month:02d}-01", f"{year}-{month:02d}-{total_days:02d}"]],
+            "attendance_date": ["between", [from_d, to_d]],
             "docstatus": ["!=", 2]
         },
         fields=[
@@ -112,6 +115,29 @@ def execute(filters=None):
     )
 
     att_map = {(a.employee, str(a.attendance_date)): a for a in attendances}
+
+    # Fetch approved leave applications (Item: CL, SL, EL, C/OFF applied/approved)
+    leave_applications = frappe.get_all(
+        "Leave Application",
+        filters={
+            "employee": ["in", [e.name for e in employees]],
+            "docstatus": ["!=", 2],
+            "status": ["in", ["Approved", "Open"]],
+            "to_date": [">=", from_d],
+            "from_date": ["<=", to_d]
+        },
+        fields=["employee", "leave_type", "from_date", "to_date", "half_day", "half_day_date"]
+    )
+
+    leave_app_map = {}
+    for la in leave_applications:
+        cur_d = getdate(la.from_date)
+        end_d = getdate(la.to_date)
+        while cur_d <= end_d:
+            if getdate(from_d) <= cur_d <= getdate(to_d):
+                key = (la.employee, str(cur_d))
+                leave_app_map[key] = la
+            cur_d = add_days(cur_d, 1)
 
     data = []
     s_no = 1
@@ -192,9 +218,43 @@ def execute(filters=None):
             has_out = bool(att and att.out_time)
 
             # -------------------------------------------------------------
-            # MISSING PUNCH LOGIC (Items 12 & 13)
+            # 1. LEAVE CHECK (Direct in Attendance OR via Approved Leave Application)
             # -------------------------------------------------------------
-            if has_in != has_out:
+            la_rec = leave_app_map.get((emp.name, d_str))
+            leave_type_str = ""
+            is_half_day_leave = False
+
+            if att and (att.status in ["On Leave", "Half Day"] or att.leave_type):
+                leave_type_str = (att.leave_type or "").upper()
+                is_half_day_leave = (att.status == "Half Day")
+            elif la_rec:
+                leave_type_str = (la_rec.leave_type or "").upper()
+                is_half_day_leave = bool(la_rec.half_day and (not la_rec.half_day_date or getdate(la_rec.half_day_date) == getdate(d_str)))
+
+            if leave_type_str:
+                if "CASUAL" in leave_type_str or "CL" in leave_type_str:
+                    cell_code = ("C" if is_half_day_leave else "CL")
+                    cl_count += (0.5 if is_half_day_leave else 1.0)
+                elif "SICK" in leave_type_str or "SL" in leave_type_str:
+                    cell_code = ("S" if is_half_day_leave else "SL")
+                    sl_count += (0.5 if is_half_day_leave else 1.0)
+                elif "EARNED" in leave_type_str or "PRIVILEGE" in leave_type_str or "EL" in leave_type_str:
+                    cell_code = ("E" if is_half_day_leave else "EL")
+                    el_count += (0.5 if is_half_day_leave else 1.0)
+                elif "COMPENSATORY" in leave_type_str or "CO" in leave_type_str or "C-OFF" in leave_type_str or "CPL" in leave_type_str:
+                    cell_code = ("O" if is_half_day_leave else "CO")
+                    coff_count += (0.5 if is_half_day_leave else 1.0)
+                else:
+                    cell_code = "L"
+
+                if is_half_day_leave and has_in and has_out:
+                    wh = float(att.working_hours or 0.0)
+                    p_days += 0.5
+
+            # -------------------------------------------------------------
+            # 2. MISSING PUNCH LOGIC (Items 12 & 13)
+            # -------------------------------------------------------------
+            elif has_in != has_out:
                 # Single punch
                 if is_sunday or h_code == "W/O":
                     cell_code = "W/O" # Item 13: Single punch on Sunday shows W/O
@@ -244,7 +304,6 @@ def execute(filters=None):
                 wh = float(att.working_hours or 0.0)
                 in_t = str(att.in_time)[11:16]
                 out_t = str(att.out_time)[11:16]
-                lt = (att.leave_type or "").upper()
 
                 if is_sunday or h_code == "W/O":
                     # Sunday Presence (Items 6 & 7)
@@ -255,22 +314,6 @@ def execute(filters=None):
                     elif wh > 3.5:
                         coff_count += 0.5
                     # Note: Sunday work is not counted in regular shift p_days (Actual Present Days)
-
-                elif att.status == "On Leave":
-                    if "CASUAL" in lt or "CL" in lt:
-                        cell_code = "CL"
-                        cl_count += 1.0
-                    elif "SICK" in lt or "SL" in lt:
-                        cell_code = "SL"
-                        sl_count += 1.0
-                    elif "EARNED" in lt or "PRIVILEGE" in lt or "EL" in lt:
-                        cell_code = "EL"
-                        el_count += 1.0
-                    elif "COMPENSATORY" in lt or "CO" in lt or "C-OFF" in lt:
-                        cell_code = "CO"
-                        coff_count += 1.0
-                    else:
-                        cell_code = "L"
 
                 else:
                     # Working day logic (Items 1, 8, 9)

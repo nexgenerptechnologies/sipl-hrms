@@ -51,6 +51,8 @@ frappe.query_reports["Attendance Performance Summary"] = {
                 value = `<span style="color: #1565c0; font-weight: bold;">W/O</span>`;
             } else if (value === "H/D") {
                 value = `<span style="color: #00838f; font-weight: bold;">H/D</span>`;
+            } else if (["CL", "SL", "EL", "CO", "L", "C", "S", "E", "O"].includes(value)) {
+                value = `<span style="color: #d84315; font-weight: 600;">${value}</span>`;
             }
         } else if (data.metric === "Late Coming" || data.metric === "Gate Pass") {
             if (value === "1") {
