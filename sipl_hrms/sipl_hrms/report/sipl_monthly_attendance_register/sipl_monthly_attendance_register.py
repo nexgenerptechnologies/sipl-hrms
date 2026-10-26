@@ -307,12 +307,8 @@ def execute(filters=None):
 
                 if is_sunday or h_code == "W/O":
                     # Sunday Presence (Items 6 & 7)
-                    # Status displays as PWO; compensation is credited to CPL (C/OFF column)
                     cell_code = "PWO"
-                    if wh >= 7.0:
-                        coff_count += 1.0
-                    elif wh > 3.5:
-                        coff_count += 0.5
+                    # Sunday work is earned as CPL; C/OFF column shows zero until C-Off leave is actually applied
                     # Note: Sunday work is not counted in regular shift p_days (Actual Present Days)
 
                 else:
@@ -358,10 +354,10 @@ def execute(filters=None):
                                     cell_code = "P/A"
                                     p_days -= 0.5
 
-                # OT Calculation (Item 16: Option A)
+                # OT Calculation (No OT up to 10 hrs; if > 10.0 hrs, OT is wh - 9.0)
                 if is_ot_applicable:
-                    if wh > 10.0:
-                        total_ot += round(wh - 10.0, 1)
+                    if round(wh, 1) > 10.0:
+                        total_ot += round(wh - 9.0, 1)
 
             row[f"day_{day}"] = cell_code
 
@@ -372,8 +368,8 @@ def execute(filters=None):
         row["total_sl"] = sl_count
         row["total_el"] = el_count
         row["total_coff"] = coff_count
-        # CPL is a credited leave balance, not added to current month's regular G. Total
-        row["g_total"] = p_days + wo_count + h_count + cl_count + sl_count + el_count
+        # CPL is a credited leave balance, not added to current month's regular G. Total unless C/OFF applied
+        row["g_total"] = p_days + wo_count + h_count + cl_count + sl_count + el_count + coff_count
 
         row["total_ot"] = round(total_ot, 1) if is_ot_applicable else 0.0
         row["attendance_bonus"] = 2000.0 if (p_days > 0 and absent_count == 0) else 0.0

@@ -44,8 +44,10 @@ def execute(filters=None):
         "width": 80
     })
 
-    # Summary columns added after Total as requested
+    # Summary columns added after Total as requested (W/O, H/D, CL, SL, EL, C/OFF, G. Total, Total OT, Att. Bonus)
     columns.extend([
+        {"label": "W/O", "fieldname": "total_wo", "fieldtype": "Int", "width": 45},
+        {"label": "H/D", "fieldname": "total_h", "fieldtype": "Int", "width": 45},
         {"label": "CL", "fieldname": "total_cl", "fieldtype": "Float", "width": 45},
         {"label": "SL", "fieldname": "total_sl", "fieldtype": "Float", "width": 45},
         {"label": "EL", "fieldname": "total_el", "fieldtype": "Float", "width": 45},
@@ -287,11 +289,9 @@ def execute(filters=None):
                     if wh >= 7.0:
                         cpl_val = "1"
                         tot_sunday_cpl += 1.0
-                        coff_count += 1.0
                     elif wh > 3.5:
                         cpl_val = "0.5"
                         tot_sunday_cpl += 0.5
-                        coff_count += 0.5
                     else:
                         cpl_val = ""
 
@@ -354,11 +354,11 @@ def execute(filters=None):
                                     p_count -= 0.5 # adjusted to half day
 
                         # ---------------------------------------------------------
-                        # OVERTIME (Item 16: Option A)
+                        # OVERTIME (No OT up to 10 hrs; if > 10.0 hrs, OT is wh - 9.0)
                         # ---------------------------------------------------------
                         if is_ot_applicable:
-                            if wh > 10.0:
-                                ot_h = round(wh - 10.0, 1)
+                            if round(wh, 1) > 10.0:
+                                ot_h = round(wh - 9.0, 1)
                                 ot_val = str(ot_h)
                                 tot_ot_hours += ot_h
                             else:
@@ -402,10 +402,12 @@ def execute(filters=None):
         row_cpl_hrs["total_value"] = str(int(round(tot_cpl_hours))) if not is_ot_applicable and tot_cpl_hours > 0 else ""
         row_cpl["total_value"] = str(round(tot_sunday_cpl, 1)) if tot_sunday_cpl > 0 else ""
 
-        # G. Total strictly excludes CPL/CO (as per rule: do not add CPL value in G. Total)
-        g_total = p_count + wo_count + h_count + cl_count + sl_count + el_count
+        # G. Total strictly excludes CPL/CO earned until applied (as per rule: do not add CPL value in G. Total)
+        g_total = p_count + wo_count + h_count + cl_count + sl_count + el_count + coff_count
 
         # Populate additional summary columns on row_in (primary employee row)
+        row_in["total_wo"] = wo_count
+        row_in["total_h"] = h_count
         row_in["total_cl"] = cl_count
         row_in["total_sl"] = sl_count
         row_in["total_el"] = el_count
@@ -416,6 +418,8 @@ def execute(filters=None):
 
         # Leave other metric rows empty for summary columns to maintain clean layout
         for r in [row_out, row_status, row_thrs, row_late, row_gp, row_ot, row_cpl_hrs, row_cpl]:
+            r["total_wo"] = ""
+            r["total_h"] = ""
             r["total_cl"] = ""
             r["total_sl"] = ""
             r["total_el"] = ""

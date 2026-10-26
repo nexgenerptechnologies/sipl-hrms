@@ -27,9 +27,9 @@ def process_attendance_rules(doc, method=None):
     # ----------------------------------------------------
     if ot_applicable == "OT Applicable":
         doc.custom_late_stay_hours = 0.0
-        # OT Rule: Option A - OT is calculated only for hours beyond 10.0 hours
-        if working_hours > 10.0:
-            doc.custom_overtime_hours = round(working_hours - 10.0, 2)
+        # No overtime up to 10 hours, but if employee worked > 10.0 hrs (e.g. 10.5 hrs), OT is 1.5 hrs (wh - 9.0)
+        if round(working_hours, 1) > 10.0:
+            doc.custom_overtime_hours = round(working_hours - 9.0, 2)
         else:
             doc.custom_overtime_hours = 0.0
     else:
