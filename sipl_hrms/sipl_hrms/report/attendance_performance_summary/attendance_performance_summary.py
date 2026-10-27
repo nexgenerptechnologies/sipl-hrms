@@ -3,6 +3,7 @@ from frappe.utils import getdate, add_days, formatdate
 from datetime import datetime
 import calendar
 import re
+from sipl_hrms.utils import get_all_shift_details
 
 def execute(filters=None):
     if not filters:
@@ -75,7 +76,7 @@ def execute(filters=None):
     employees = frappe.get_all(
         "Employee",
         filters=emp_filters,
-        fields=["name", "employee_name", "employee_number", "custom_overtime_applicable"]
+        fields=["name", "employee_name", "employee_number", "custom_overtime_applicable", "default_shift"]
     )
 
     # Order according to Employee Number (natural sort)
@@ -86,6 +87,9 @@ def execute(filters=None):
         return (num_part, emp_num, emp.get("name") or "")
 
     employees.sort(key=natural_sort_key)
+
+    # Fetch dynamic shift details
+    shift_map = get_all_shift_details()
 
     emp_ids = [e.name for e in employees]
 
@@ -100,7 +104,7 @@ def execute(filters=None):
     attendances = frappe.get_all("Attendance", filters=att_filters, fields=[
         "employee", "attendance_date", "status", "leave_type", "in_time", "out_time", 
         "working_hours", "custom_overtime_hours", "custom_late_stay_hours", 
-        "custom_gate_pass_linked", "late_entry"
+        "custom_gate_pass_linked", "late_entry", "shift"
     ])
 
     att_map = {}
@@ -174,6 +178,16 @@ def execute(filters=None):
             d_str = str(d)
             rec = att_map.get((emp_id, d_str))
             la_rec = leave_app_map.get((emp_id, d_str))
+
+            # Dynamic shift resolution for this employee / day
+            shift_name = rec.shift if (rec and rec.shift) else (emp.get("default_shift") or "General")
+            shift_info = shift_map.get(shift_name) or shift_map.get("General") or {
+                "start_time": "09:30", "end_time": "18:30", "grace_cutoff": "10:00", "gp_max_cutoff": "11:30"
+            }
+            shift_start_str = shift_info["start_time"]
+            shift_end_str = shift_info["end_time"]
+            grace_cutoff = shift_info["grace_cutoff"]
+            gp_max_cutoff = shift_info["gp_max_cutoff"]
 
             is_sunday = (d.weekday() == 6)
             h_type = holiday_map.get(d_str)
@@ -305,10 +319,10 @@ def execute(filters=None):
                         st_val = "A"
                         absent_count += 1
                     else:
-                        is_late_entry = (in_val > "09:30")
+                        is_late_entry = (in_val > shift_start_str)
 
                         if is_late_entry:
-                            if in_val <= "10:00":
+                            if in_val <= grace_cutoff:
                                 # Late Coming grace period (up to 30 mins)
                                 late_grace_used += 1
                                 late_val = "1"
@@ -320,7 +334,7 @@ def execute(filters=None):
                                     st_val = "A/P"
                                     p_count += 0.5
 
-                            elif in_val <= "11:30":
+                            elif in_val <= gp_max_cutoff:
                                 # Gate pass allowance window (30 mins to 2 hours)
                                 if gate_pass_used < 2:
                                     gate_pass_used += 1
@@ -332,7 +346,7 @@ def execute(filters=None):
                                     st_val = "A/P" # Item 9: after 2 gate passes -> A/P
                                     p_count += 0.5
                             else:
-                                # Arrived after 11:30 AM
+                                # Arrived after gp_max_cutoff
                                 st_val = "A/P"
                                 p_count += 0.5
 
@@ -341,8 +355,8 @@ def execute(filters=None):
                             st_val = "P"
                             p_count += 1.0
 
-                        # Check early departure before 18:30 (Item 9)
-                        if out_val and out_val < "18:30" and wh < 8.5:
+                        # Check early departure before shift end
+                        if out_val and out_val < shift_end_str and wh < 8.5:
                             if st_val == "P":
                                 if gate_pass_used < 2:
                                     gate_pass_used += 1
@@ -369,7 +383,7 @@ def execute(filters=None):
                         # ---------------------------------------------------------
                         if not is_ot_applicable:
                             out_dt = datetime.strptime(f"{d_str} {out_val}", "%Y-%m-%d %H:%M")
-                            shift_end = datetime.strptime(f"{d_str} 18:30", "%Y-%m-%d %H:%M")
+                            shift_end = datetime.strptime(f"{d_str} {shift_end_str}", "%Y-%m-%d %H:%M")
                             if out_dt > shift_end:
                                 extra_secs = (out_dt - shift_end).total_seconds()
                                 extra_h = round(extra_secs / 3600.0, 1)

@@ -33,7 +33,7 @@ def hourly_attendance_processor():
         diff_seconds = frappe.utils.time_diff_in_seconds(out_time, in_time)
         hours = round(diff_seconds / 3600.0, 2)
         
-        # SIPL General Shift (9:30 AM - 6:30 PM, 9h shift)
+        # Working hours status evaluation
         if len(logs) == 1:
             status = "Half Day"
             hours = 4.0
@@ -47,6 +47,21 @@ def hourly_attendance_processor():
         emp_doc = frappe.get_doc("Employee", emp_id)
         company = emp_doc.company or "SIMPLE INTEGRAL PVT. LTD."
         
+        # Determine employee's shift dynamically for this date
+        shift_name = frappe.db.get_value("Shift Assignment", {
+            "employee": emp_id,
+            "start_date": ["<=", att_date],
+            "end_date": [">=", att_date],
+            "docstatus": 1,
+            "status": "Active"
+        }, "shift_type") or frappe.db.get_value("Shift Assignment", {
+            "employee": emp_id,
+            "start_date": ["<=", att_date],
+            "end_date": ["is", "not set"],
+            "docstatus": 1,
+            "status": "Active"
+        }, "shift_type") or emp_doc.default_shift or "General"
+
         existing_att = frappe.db.get_value("Attendance", {
             "employee": emp_id,
             "attendance_date": att_date,
@@ -59,7 +74,7 @@ def hourly_attendance_processor():
             att.attendance_date = att_date
             att.company = company
             att.status = status
-            att.shift = "General"
+            att.shift = shift_name
             att.in_time = in_time
             att.out_time = out_time
             att.working_hours = hours
@@ -75,7 +90,7 @@ def hourly_attendance_processor():
                 
         for l in logs:
             frappe.db.set_value("Employee Checkin", l.name, "attendance", att_name)
-            frappe.db.set_value("Employee Checkin", l.name, "shift", "General")
+            frappe.db.set_value("Employee Checkin", l.name, "shift", shift_name)
             frappe.db.set_value("Employee Checkin", l.name, "offshift", 0)
 
     frappe.db.commit()

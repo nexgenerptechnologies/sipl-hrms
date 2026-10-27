@@ -1,5 +1,6 @@
 import frappe
 from frappe.utils import getdate, get_datetime, time_diff_in_seconds, add_days
+from sipl_hrms.utils import get_shift_details
 
 def process_attendance_rules(doc, method=None):
     """
@@ -22,6 +23,12 @@ def process_attendance_rules(doc, method=None):
     att_date = getdate(doc.attendance_date)
     is_sunday = (att_date.weekday() == 6)
 
+    # Fetch dynamic shift details
+    shift_name = doc.shift or frappe.db.get_value("Employee", doc.employee, "default_shift") or "General"
+    shift_info = get_shift_details(shift_name)
+    shift_start_str = shift_info.get("start_time", "09:30")
+    shift_end_str = shift_info.get("end_time", "18:30")
+
     # ----------------------------------------------------
     # 1. OVERTIME vs CPL (LATE STAY)
     # ----------------------------------------------------
@@ -33,11 +40,11 @@ def process_attendance_rules(doc, method=None):
         else:
             doc.custom_overtime_hours = 0.0
     else:
-        # OT Not Applicable -> Extra stay beyond 18:30 counts towards CPL only if >= 2.0 hours
+        # OT Not Applicable -> Extra stay beyond scheduled shift end counts towards CPL only if >= 2.0 hours
         doc.custom_overtime_hours = 0.0
         if not is_sunday and doc.out_time:
             out_dt = get_datetime(doc.out_time)
-            shift_end_dt = get_datetime(f"{doc.attendance_date} 18:30:00")
+            shift_end_dt = get_datetime(f"{doc.attendance_date} {shift_end_str}:00")
             if out_dt > shift_end_dt:
                 diff_secs = time_diff_in_seconds(out_dt, shift_end_dt)
                 extra_stay_h = round(diff_secs / 3600.0, 2)
@@ -65,7 +72,7 @@ def process_attendance_rules(doc, method=None):
             doc.status = "Absent"
     elif doc.in_time:
         in_dt = get_datetime(doc.in_time)
-        shift_start_dt = get_datetime(f"{doc.attendance_date} 09:30:00")
+        shift_start_dt = get_datetime(f"{doc.attendance_date} {shift_start_str}:00")
         
         if in_dt > shift_start_dt:
             diff_secs = time_diff_in_seconds(in_dt, shift_start_dt)

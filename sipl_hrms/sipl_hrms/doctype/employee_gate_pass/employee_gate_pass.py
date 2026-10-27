@@ -1,6 +1,7 @@
 import frappe
 from frappe.model.document import Document
 from frappe.utils import getdate, time_diff_in_seconds, get_datetime
+from sipl_hrms.utils import get_shift_details
 
 class EmployeeGatePass(Document):
     def validate(self):
@@ -20,8 +21,13 @@ class EmployeeGatePass(Document):
             else:
                 self.total_duration_hours = 0.0
         else:
-            # Did not return -> duration away from work until scheduled shift end (18:30:00)
-            diff_secs = time_diff_in_seconds("2000-01-01 18:30:00", f"2000-01-01 {self.departure_time}")
+            # Did not return -> duration away from work until scheduled shift end
+            shift_end_time = "18:30:00"
+            if self.employee:
+                emp_shift = frappe.db.get_value("Employee", self.employee, "default_shift") or "General"
+                shift_info = get_shift_details(emp_shift)
+                shift_end_time = f"{shift_info.get('end_time', '18:30')}:00"
+            diff_secs = time_diff_in_seconds(f"2000-01-01 {shift_end_time}", f"2000-01-01 {self.departure_time}")
             self.total_duration_hours = max(0.0, round(diff_secs / 3600.0, 2)) if diff_secs > 0 else 0.0
 
     def validate_monthly_limit(self):
@@ -74,22 +80,27 @@ class EmployeeGatePass(Document):
         # CASE 1: OFFICIAL DUTY (OD)
         # -----------------------------------------------------------
         if self.gate_pass_type == "Official Duty (OD)":
+            emp = frappe.get_doc("Employee", self.employee)
+            emp_shift = emp.default_shift or "General"
+            shift_info = get_shift_details(emp_shift)
+            shift_start_t = f"{shift_info.get('start_time', '09:30')}:00"
+            shift_end_t = f"{shift_info.get('end_time', '18:30')}:00"
+
             if att_name:
                 frappe.db.set_value("Attendance", att_name, "status", "Present")
                 frappe.db.set_value("Attendance", att_name, "working_hours", 9.0)
                 frappe.db.set_value("Attendance", att_name, "custom_gate_pass_linked", self.name)
                 if self.will_return == "No (Direct to Home)":
-                    frappe.db.set_value("Attendance", att_name, "out_time", f"{self.date} 18:30:00")
+                    frappe.db.set_value("Attendance", att_name, "out_time", f"{self.date} {shift_end_t}")
             else:
-                emp = frappe.get_doc("Employee", self.employee)
                 new_att = frappe.new_doc("Attendance")
                 new_att.employee = self.employee
                 new_att.attendance_date = self.date
                 new_att.company = emp.company or "SIMPLE INTEGRAL PVT. LTD."
                 new_att.status = "Present"
-                new_att.shift = "General"
-                new_att.in_time = f"{self.date} 09:30:00"
-                new_att.out_time = f"{self.date} 18:30:00"
+                new_att.shift = emp_shift
+                new_att.in_time = f"{self.date} {shift_start_t}"
+                new_att.out_time = f"{self.date} {shift_end_t}"
                 new_att.working_hours = 9.0
                 new_att.custom_gate_pass_linked = self.name
                 new_att.docstatus = 1
@@ -128,13 +139,17 @@ class EmployeeGatePass(Document):
                 frappe.db.set_value("Attendance", att_name, "custom_gate_pass_linked", self.name)
             else:
                 emp = frappe.get_doc("Employee", self.employee)
+                emp_shift = emp.default_shift or "General"
+                shift_info = get_shift_details(emp_shift)
+                shift_start_t = f"{shift_info.get('start_time', '09:30')}:00"
+
                 new_att = frappe.new_doc("Attendance")
                 new_att.employee = self.employee
                 new_att.attendance_date = self.date
                 new_att.company = emp.company or "SIMPLE INTEGRAL PVT. LTD."
                 new_att.status = status
-                new_att.shift = "General"
-                new_att.in_time = in_time_val or f"{self.date} 09:30:00"
+                new_att.shift = emp_shift
+                new_att.in_time = in_time_val or f"{self.date} {shift_start_t}"
                 new_att.out_time = f"{self.date} {self.departure_time}"
                 new_att.working_hours = hours_worked
                 new_att.custom_gate_pass_linked = self.name

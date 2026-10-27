@@ -3,6 +3,7 @@ from frappe.utils import getdate, formatdate, add_days
 from datetime import datetime
 import calendar
 import re
+from sipl_hrms.utils import get_all_shift_details
 
 def execute(filters=None):
     if not filters:
@@ -68,7 +69,7 @@ def execute(filters=None):
         filters=emp_filters,
         fields=[
             "name", "employee_name", "employee_number", "custom_fathers_name",
-            "department", "designation", "custom_overtime_applicable"
+            "department", "designation", "custom_overtime_applicable", "default_shift"
         ]
     )
 
@@ -80,6 +81,9 @@ def execute(filters=None):
         return (num_part, emp_num, emp.get("name") or "")
 
     employees.sort(key=natural_sort_key)
+
+    # Fetch dynamic shift details
+    shift_map = get_all_shift_details()
 
     # Fetch holidays for company holiday list
     holiday_list = frappe.db.get_value("Company", company, "default_holiday_list") or "Holiday List 2026"
@@ -110,7 +114,7 @@ def execute(filters=None):
         },
         fields=[
             "employee", "attendance_date", "status", "leave_type",
-            "in_time", "out_time", "working_hours", "custom_overtime_hours", "late_entry"
+            "in_time", "out_time", "working_hours", "custom_overtime_hours", "late_entry", "shift"
         ]
     )
 
@@ -213,6 +217,16 @@ def execute(filters=None):
             cell_code = ""
             is_sunday = (calendar.weekday(year, month, day) == 6)
             h_code = holiday_map.get(d_str)
+
+            # Dynamic shift resolution for this employee / day
+            shift_name = att.shift if (att and att.shift) else (emp.get("default_shift") or "General")
+            shift_info = shift_map.get(shift_name) or shift_map.get("General") or {
+                "start_time": "09:30", "end_time": "18:30", "grace_cutoff": "10:00", "gp_max_cutoff": "11:30"
+            }
+            shift_start_str = shift_info["start_time"]
+            shift_end_str = shift_info["end_time"]
+            grace_cutoff = shift_info["grace_cutoff"]
+            gp_max_cutoff = shift_info["gp_max_cutoff"]
 
             has_in = bool(att and att.in_time)
             has_out = bool(att and att.out_time)
@@ -318,8 +332,8 @@ def execute(filters=None):
                         if day <= max_day_to_count:
                             absent_count += 1
                     else:
-                        if in_t > "09:30":
-                            if in_t <= "10:00":
+                        if in_t > shift_start_str:
+                            if in_t <= grace_cutoff:
                                 late_grace_used += 1
                                 if late_grace_used <= 2:
                                     cell_code = "P"
@@ -327,7 +341,7 @@ def execute(filters=None):
                                 else:
                                     cell_code = "A/P"
                                     p_days += 0.5
-                            elif in_t <= "11:30":
+                            elif in_t <= gp_max_cutoff:
                                 if gate_pass_used < 2:
                                     gate_pass_used += 1
                                     cell_code = "P" # Items 1 & 8: 1st & 2nd gate pass allowed -> P
@@ -336,7 +350,7 @@ def execute(filters=None):
                                     cell_code = "A/P" # Item 9: after 2 gate passes -> A/P
                                     p_days += 0.5
                             else:
-                                # Arrived after 11:30 AM
+                                # Arrived after gp_max_cutoff
                                 cell_code = "A/P"
                                 p_days += 0.5
                         else:
@@ -345,7 +359,7 @@ def execute(filters=None):
                             p_days += 1.0
 
                         # Check early departure
-                        if out_t < "18:30" and wh < 8.5:
+                        if out_t < shift_end_str and wh < 8.5:
                             if cell_code == "P":
                                 if gate_pass_used < 2:
                                     gate_pass_used += 1
