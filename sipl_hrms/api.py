@@ -160,6 +160,20 @@ def receive_easytimepro_punch(*args, **kwargs):
             checkin.employee = emp_name
             checkin.time = punch_time
             checkin.device_id = device_sn
+
+            # Geolocation coordinates (default to SIPL plant location if not sent by device)
+            lat = item.get("LATITUDE") or item.get("latitude")
+            lon = item.get("LONGITUDE") or item.get("longitude")
+            try:
+                checkin.latitude = float(lat) if lat else 28.4787974
+            except Exception:
+                checkin.latitude = 28.4787974
+
+            try:
+                checkin.longitude = float(lon) if lon else 76.9881728
+            except Exception:
+                checkin.longitude = 76.9881728
+
             if log_type:
                 checkin.log_type = log_type
             checkin.insert(ignore_permissions=True)
