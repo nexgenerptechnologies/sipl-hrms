@@ -101,7 +101,23 @@ def receive_easytimepro_punch(*args, **kwargs):
                 elif "EMP_CODE" in parsed or "emp_code" in parsed or "employee_id" in parsed:
                     punches = [parsed]
 
-    # 2. Try frappe.form_dict if not parsed from raw body
+    # 2. Try plain text / CSV fallback if not valid JSON
+    if not punches and raw_data:
+        lines = [line.strip() for line in raw_data.strip().splitlines() if line.strip()]
+        for line in lines:
+            # Check delimiter: comma, pipe, or tab
+            delimiter = "," if "," in line else ("|" if "|" in line else ("\t" if "\t" in line else None))
+            if delimiter:
+                parts = [p.strip().strip("'").strip('"') for p in line.split(delimiter)]
+                if len(parts) >= 2:
+                    punches.append({
+                        "EMP_CODE": parts[0],
+                        "PUNCH_DATETIME": parts[1],
+                        "PUNCH_STATE": parts[2] if len(parts) > 2 else "Check In",
+                        "TERMINAL_SN": parts[3] if len(parts) > 3 else "EasyTimePro"
+                    })
+
+    # 3. Try frappe.form_dict if not parsed from raw body
     if not punches and frappe.form_dict:
         data_field = frappe.form_dict.get("data") or frappe.form_dict.get("punches")
         if data_field and isinstance(data_field, str):
