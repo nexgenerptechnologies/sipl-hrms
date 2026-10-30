@@ -74,10 +74,23 @@ def receive_easytimepro_punch(*args, **kwargs):
 
     punches = []
 
-    # 1. Try parsing raw JSON body
+    # 1. Try parsing raw JSON body (standard JSON or single-quoted Python dict/list)
     if raw_data:
         try:
             parsed = json.loads(raw_data)
+        except Exception:
+            try:
+                import ast
+                parsed = ast.literal_eval(raw_data)
+            except Exception:
+                try:
+                    # Clean up quotes if needed
+                    cleaned = raw_data.replace("'", '"')
+                    parsed = json.loads(cleaned)
+                except Exception:
+                    pass
+
+        if parsed:
             if isinstance(parsed, list):
                 punches = parsed
             elif isinstance(parsed, dict):
@@ -87,8 +100,6 @@ def receive_easytimepro_punch(*args, **kwargs):
                     punches = parsed["punches"]
                 elif "EMP_CODE" in parsed or "emp_code" in parsed or "employee_id" in parsed:
                     punches = [parsed]
-        except Exception:
-            pass
 
     # 2. Try frappe.form_dict if not parsed from raw body
     if not punches and frappe.form_dict:
