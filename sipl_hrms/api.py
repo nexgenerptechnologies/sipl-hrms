@@ -72,6 +72,12 @@ def receive_easytimepro_punch(*args, **kwargs):
     except Exception:
         pass
 
+    # Log incoming request for diagnostics
+    frappe.log_error(
+        f"Raw Body: {raw_data} | form_dict: {frappe.form_dict} | args: {args} | kwargs: {kwargs}",
+        "EasyTimePro API Call"
+    )
+
     punches = []
 
     # 1. Try parsing raw JSON body (standard JSON or single-quoted Python dict/list)
