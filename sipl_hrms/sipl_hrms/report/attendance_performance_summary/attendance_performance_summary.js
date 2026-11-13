@@ -43,6 +43,8 @@ frappe.query_reports["Attendance Performance Summary"] = {
                 value = `<span style="color: #2e7d32; font-weight: bold;">P</span>`;
             } else if (value === "PWO") {
                 value = `<span style="color: #6a1b9a; font-weight: bold;">PWO</span>`;
+            } else if (value === "PHD") {
+                value = `<span style="color: #00695c; font-weight: bold;">PHD</span>`;
             } else if (value === "A") {
                 value = `<span style="color: #c62828; font-weight: bold;">A</span>`;
             } else if (value === "A/P" || value === "P/A") {

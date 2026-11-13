@@ -85,31 +85,41 @@ def execute(filters=None):
     # Fetch dynamic shift details
     shift_map = get_all_shift_details()
 
-    # Fetch holidays for company holiday list
+    # Fetch holidays for company holiday list (with 15 days buffer for sandwich checks)
     holiday_list = frappe.db.get_value("Company", company, "default_holiday_list") or "Holiday List 2026"
+    buf_from = add_days(f"{year}-{month:02d}-01", -15)
+    buf_to = add_days(f"{year}-{month:02d}-{total_days:02d}", 15)
+
     holidays = frappe.get_all("Holiday", filters={
         "parent": holiday_list,
-        "holiday_date": ["between", [f"{year}-{month:02d}-01", f"{year}-{month:02d}-{total_days:02d}"]]
+        "holiday_date": ["between", [str(buf_from), str(buf_to)]]
     }, fields=["holiday_date", "weekly_off"])
 
     # Item 5: Use H/D instead of H
     holiday_map = {str(h.holiday_date): ("W/O" if h.weekly_off else "H/D") for h in holidays}
 
+    # Add Sundays to holiday_map if not present
+    scan_c = buf_from
+    while scan_c <= buf_to:
+        if scan_c.weekday() == 6:
+            holiday_map[str(scan_c)] = "W/O"
+        scan_c = add_days(scan_c, 1)
+
     # Helper: Check if a given day is a scheduled off-day (Sunday or holiday)
-    def is_day_off(d_num):
-        d_str_check = f"{year}-{month:02d}-{d_num:02d}"
-        is_sun = (calendar.weekday(year, month, d_num) == 6)
+    def is_day_off(d_date):
+        d_str_check = str(d_date)
+        is_sun = (getdate(d_date).weekday() == 6)
         h_val = holiday_map.get(d_str_check)
         return is_sun or (h_val in ["W/O", "H/D"])
 
-    # Fetch Attendance records for the month
+    # Fetch Attendance records for the month (buffered)
     from_d = f"{year}-{month:02d}-01"
     to_d = f"{year}-{month:02d}-{total_days:02d}"
 
     attendances = frappe.get_all(
         "Attendance",
         filters={
-            "attendance_date": ["between", [from_d, to_d]],
+            "attendance_date": ["between", [str(buf_from), str(buf_to)]],
             "docstatus": ["!=", 2]
         },
         fields=[
@@ -127,8 +137,8 @@ def execute(filters=None):
             "employee": ["in", [e.name for e in employees]],
             "docstatus": ["!=", 2],
             "status": ["in", ["Approved", "Open"]],
-            "to_date": [">=", from_d],
-            "from_date": ["<=", to_d]
+            "to_date": [">=", str(buf_from)],
+            "from_date": ["<=", str(buf_to)]
         },
         fields=["employee", "leave_type", "from_date", "to_date", "half_day", "half_day_date"]
     )
@@ -174,41 +184,34 @@ def execute(filters=None):
         gate_pass_used = 0
         late_grace_used = 0
 
-        # Helper to check if an employee is qualified (Present or ANY leave) on a specific day (Item 15)
-        def is_qualified(d_num):
-            if d_num < 1 or d_num > total_days:
-                check_d = getdate(f"{year}-{month:02d}-01")
-                if d_num < 1:
-                    adj_date = add_days(check_d, d_num - 1)
-                else:
-                    adj_date = add_days(getdate(f"{year}-{month:02d}-{total_days:02d}"), d_num - total_days)
-                rec_adj = frappe.db.get_value("Attendance", {
-                    "employee": emp.name,
-                    "attendance_date": adj_date,
-                    "docstatus": ["!=", 2]
-                }, ["status", "leave_type"], as_dict=True)
-                if rec_adj:
-                    if rec_adj.status in ["Present", "Half Day"] or rec_adj.leave_type:
-                        return True
-                return False
-
-            d_s = f"{year}-{month:02d}-{d_num:02d}"
+        # Helper to check if an employee is qualified (Present or ANY leave) on a specific day
+        def is_qualified(d_date):
+            d_s = str(d_date)
             rec = att_map.get((emp.name, d_s))
+            la = leave_app_map.get((emp.name, d_s))
+            if la or (rec and rec.leave_type):
+                return True
             if rec:
-                if rec.status in ["Present", "Half Day"] or rec.leave_type:
+                wh = float(rec.working_hours or 0.0)
+                st = rec.status
+                if rec.in_time and rec.out_time and 0.0 < wh < 4.0:
+                    return False
+                if st in ["Present", "Half Day"]:
+                    return True
+                if rec.in_time and not rec.out_time:
                     return True
             return False
 
-        def get_prev_working_day(d_num):
-            cur = d_num - 1
-            while cur >= 1 and is_day_off(cur):
-                cur -= 1
+        def get_prev_working_day(d_date):
+            cur = add_days(d_date, -1)
+            while is_day_off(cur):
+                cur = add_days(cur, -1)
             return cur
 
-        def get_next_working_day(d_num):
-            cur = d_num + 1
-            while cur <= total_days and is_day_off(cur):
-                cur += 1
+        def get_next_working_day(d_date):
+            cur = add_days(d_date, 1)
+            while is_day_off(cur):
+                cur = add_days(cur, 1)
             return cur
 
         for day in range(1, total_days + 1):
@@ -289,18 +292,23 @@ def execute(filters=None):
                 is_hol = (h_code == "H/D")
 
                 if is_wo:
-                    # Weekly Off on Sunday (e.g. Day 18, Day 25)
-                    cell_code = "W/O"
-                    if day <= max_day_to_count:
-                        wo_count += 1
+                    # Req 4: Weekly Off sandwich rule
+                    prev_w_day = get_prev_working_day(d_str)
+                    next_w_day = get_next_working_day(d_str)
+                    if is_qualified(prev_w_day) or is_qualified(next_w_day):
+                        cell_code = "W/O"
+                        if day <= max_day_to_count:
+                            wo_count += 1
+                    else:
+                        cell_code = "A"
+                        if day <= max_day_to_count:
+                            absent_count += 1
                 elif is_hol:
-                    # Item 15: Sandwich rule check for Holiday (e.g. 2nd Oct)
-                    prev_w_day = get_prev_working_day(day)
-                    next_w_day = get_next_working_day(day)
+                    # Req 2: Sandwich rule for Holiday
+                    prev_w_day = get_prev_working_day(d_str)
+                    next_w_day = get_next_working_day(d_str)
 
-                    is_sandwich_eligible = is_qualified(prev_w_day) or is_qualified(next_w_day)
-
-                    if is_sandwich_eligible:
+                    if is_qualified(prev_w_day) or is_qualified(next_w_day):
                         cell_code = "H/D"
                         if day <= max_day_to_count:
                             h_count += 1
@@ -320,10 +328,24 @@ def execute(filters=None):
                 out_t = str(att.out_time)[11:16]
 
                 if is_sunday or h_code == "W/O":
-                    # Sunday Presence (Items 6 & 7)
+                    # Sunday Presence (PWO) (Req 3)
                     cell_code = "PWO"
-                    # Sunday work is earned as CPL; C/OFF column shows zero until C-Off leave is actually applied
-                    # Note: Sunday work is not counted in regular shift p_days (Actual Present Days)
+                    if day <= max_day_to_count:
+                        wo_count += 1 # PWO counted in W/O total!
+                    if is_ot_applicable:
+                        ot_h = round(wh, 1)
+                        if day <= max_day_to_count:
+                            total_ot += ot_h
+
+                elif h_code == "H/D":
+                    # Holiday Presence (PHD) (Req 1)
+                    cell_code = "PHD"
+                    if day <= max_day_to_count:
+                        h_count += 1 # Counted in Holiday total!
+                    if is_ot_applicable:
+                        ot_h = round(wh, 1)
+                        if day <= max_day_to_count:
+                            total_ot += ot_h
 
                 else:
                     # Working day logic (Items 1, 8, 9)

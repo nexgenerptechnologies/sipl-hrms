@@ -58,14 +58,22 @@ def execute(filters=None):
         {"label": "Att. Bonus (₹)", "fieldname": "attendance_bonus", "fieldtype": "Currency", "width": 105}
     ])
 
-    # Fetch holidays for the company
+    # Fetch holidays for the company (including extended buffer for adjacent working days check)
     holiday_list = frappe.db.get_value("Company", company, "default_holiday_list") or "Holiday List 2026"
     holidays = frappe.get_all("Holiday", filters={
         "parent": holiday_list,
-        "holiday_date": ["between", [from_date, to_date]]
+        "holiday_date": ["between", [add_days(from_date, -15), add_days(to_date, 15)]]
     }, fields=["holiday_date", "weekly_off", "description"])
 
     holiday_map = {str(h.holiday_date): ("W/O" if h.weekly_off else "H/D") for h in holidays}
+
+    # Add all Sundays to holiday_map if not already present
+    scan_d = add_days(from_date, -15)
+    end_scan_d = add_days(to_date, 15)
+    while scan_d <= end_scan_d:
+        if scan_d.weekday() == 6:
+            holiday_map[str(scan_d)] = "W/O"
+        scan_d = add_days(scan_d, 1)
 
     # Fetch active employees
     emp_filters = {"status": "Active"}
@@ -93,9 +101,9 @@ def execute(filters=None):
 
     emp_ids = [e.name for e in employees]
 
-    # Fetch attendance records
+    # Fetch attendance records (with buffer for adjacent working day checks)
     att_filters = {
-        "attendance_date": ["between", [from_date, to_date]],
+        "attendance_date": ["between", [add_days(from_date, -15), add_days(to_date, 15)]],
         "docstatus": ["!=", 2]
     }
     if company: att_filters["company"] = company
@@ -119,11 +127,36 @@ def execute(filters=None):
             "employee": ["in", emp_ids],
             "docstatus": ["!=", 2],
             "status": ["in", ["Approved", "Open"]],
-            "to_date": [">=", from_date],
-            "from_date": ["<=", to_date]
+            "to_date": [">=", add_days(from_date, -15)],
+            "from_date": ["<=", add_days(to_date, 15)]
         },
         fields=["employee", "leave_type", "from_date", "to_date", "half_day", "half_day_date"]
     )
+
+    def find_working_days_around(target_date, h_map):
+        prev_d = add_days(target_date, -1)
+        while str(prev_d) in h_map or prev_d.weekday() == 6:
+            prev_d = add_days(prev_d, -1)
+        next_d = add_days(target_date, 1)
+        while str(next_d) in h_map or next_d.weekday() == 6:
+            next_d = add_days(next_d, 1)
+        return str(prev_d), str(next_d)
+
+    def is_emp_qualified(emp_id, d_str):
+        rec = att_map.get((emp_id, d_str))
+        la = leave_app_map.get((emp_id, d_str))
+        if la or (rec and rec.leave_type):
+            return True
+        if rec:
+            wh = float(rec.working_hours or 0.0)
+            st = rec.status
+            if rec.in_time and rec.out_time and 0.0 < wh < 4.0:
+                return False
+            if st in ["Present", "Half Day"]:
+                return True
+            if rec.in_time and not rec.out_time:
+                return True
+        return False
 
     leave_app_map = {}
     for la in leave_applications:
@@ -263,21 +296,22 @@ def execute(filters=None):
             elif not has_in and not has_out:
                 # No punches
                 if is_sunday or h_type == "W/O":
-                    st_val = "W/O"
-                    wo_count += 1
+                    # Req 4: Sandwich rule for Weekly Off
+                    prev_w, next_w = find_working_days_around(d, holiday_map)
+                    q_prev = is_emp_qualified(emp_id, prev_w)
+                    q_next = is_emp_qualified(emp_id, next_w)
+                    if q_prev or q_next:
+                        st_val = "W/O"
+                        wo_count += 1
+                    else:
+                        st_val = "A"
+                        absent_count += 1
                 elif h_type == "H/D":
-                    # Item 15: Sandwich rule for Holiday
-                    prev_d_str = str(add_days(d, -1))
-                    next_d_str = str(add_days(d, 1))
-                    prev_rec = att_map.get((emp_id, prev_d_str))
-                    next_rec = att_map.get((emp_id, next_d_str))
-                    prev_la = leave_app_map.get((emp_id, prev_d_str))
-                    next_la = leave_app_map.get((emp_id, next_d_str))
-
-                    prev_qual = bool((prev_rec and (prev_rec.status in ["Present", "Half Day"] or prev_rec.leave_type)) or prev_la)
-                    next_qual = bool((next_rec and (next_rec.status in ["Present", "Half Day"] or next_rec.leave_type)) or next_la)
-
-                    if prev_qual or next_qual:
+                    # Req 2 & 4: Sandwich rule for Holiday
+                    prev_w, next_w = find_working_days_around(d, holiday_map)
+                    q_prev = is_emp_qualified(emp_id, prev_w)
+                    q_next = is_emp_qualified(emp_id, next_w)
+                    if q_prev or q_next:
                         st_val = "H/D"
                         h_count += 1
                     else:
@@ -296,20 +330,51 @@ def execute(filters=None):
 
                 if is_sunday or h_type == "W/O":
                     # ---------------------------------------------------------
-                    # SUNDAY ATTENDANCE & CPL (Items 7 & 11)
+                    # SUNDAY ATTENDANCE & CPL / OT (Req 3)
                     # ---------------------------------------------------------
                     st_val = "PWO"
+                    wo_count += 1 # PWO counted in W/O total!
 
-                    if wh >= 7.0:
-                        cpl_val = "1"
-                        tot_sunday_cpl += 1.0
-                    elif wh > 3.5:
-                        cpl_val = "0.5"
-                        tot_sunday_cpl += 0.5
-                    else:
+                    if is_ot_applicable:
+                        ot_h = round(wh, 1)
+                        ot_val = str(ot_h)
+                        tot_ot_hours += ot_h
                         cpl_val = ""
+                        cpl_hrs_val = ""
+                    else:
+                        if wh >= 7.0:
+                            cpl_val = "1"
+                            tot_sunday_cpl += 1.0
+                        elif wh > 3.5:
+                            cpl_val = "0.5"
+                            tot_sunday_cpl += 0.5
+                        else:
+                            cpl_val = ""
+                        cpl_hrs_val = ""
 
-                    cpl_hrs_val = "" # On Sunday CPL hours should not show
+                elif h_type == "H/D":
+                    # ---------------------------------------------------------
+                    # HOLIDAY ATTENDANCE (PHD) (Req 1)
+                    # ---------------------------------------------------------
+                    st_val = "PHD"
+                    h_count += 1 # Counted in Holiday total!
+
+                    if is_ot_applicable:
+                        ot_h = round(wh, 1)
+                        ot_val = str(ot_h)
+                        tot_ot_hours += ot_h
+                        cpl_val = ""
+                        cpl_hrs_val = ""
+                    else:
+                        if wh >= 7.0:
+                            cpl_val = "1"
+                            tot_sunday_cpl += 1.0
+                        elif wh > 3.5:
+                            cpl_val = "0.5"
+                            tot_sunday_cpl += 0.5
+                        else:
+                            cpl_val = ""
+                        cpl_hrs_val = ""
 
                 else:
                     # ---------------------------------------------------------
