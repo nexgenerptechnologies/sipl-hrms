@@ -207,6 +207,8 @@ def receive_easytimepro_punch(*args, **kwargs):
             except Exception:
                 checkin.longitude = 76.9881728
 
+            checkin.custom_address = item.get("ADDRESS") or item.get("address") or "Sector 104, Gurgaon, Gurugram, Haryana, 122006"
+
             if log_type:
                 checkin.log_type = log_type
             checkin.insert(ignore_permissions=True)
