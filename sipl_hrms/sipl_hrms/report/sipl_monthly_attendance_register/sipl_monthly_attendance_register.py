@@ -87,8 +87,8 @@ def execute(filters=None):
 
     # Fetch holidays for company holiday list (with 15 days buffer for sandwich checks)
     holiday_list = frappe.db.get_value("Company", company, "default_holiday_list") or "Holiday List 2026"
-    buf_from = add_days(f"{year}-{month:02d}-01", -15)
-    buf_to = add_days(f"{year}-{month:02d}-{total_days:02d}", 15)
+    buf_from = getdate(add_days(f"{year}-{month:02d}-01", -15))
+    buf_to = getdate(add_days(f"{year}-{month:02d}-{total_days:02d}", 15))
 
     holidays = frappe.get_all("Holiday", filters={
         "parent": holiday_list,
@@ -103,7 +103,7 @@ def execute(filters=None):
     while scan_c <= buf_to:
         if scan_c.weekday() == 6:
             holiday_map[str(scan_c)] = "W/O"
-        scan_c = add_days(scan_c, 1)
+        scan_c = getdate(add_days(scan_c, 1))
 
     # Helper: Check if a given day is a scheduled off-day (Sunday or holiday)
     def is_day_off(d_date):
@@ -203,15 +203,15 @@ def execute(filters=None):
             return False
 
         def get_prev_working_day(d_date):
-            cur = add_days(d_date, -1)
+            cur = getdate(add_days(d_date, -1))
             while is_day_off(cur):
-                cur = add_days(cur, -1)
+                cur = getdate(add_days(cur, -1))
             return cur
 
         def get_next_working_day(d_date):
-            cur = add_days(d_date, 1)
+            cur = getdate(add_days(d_date, 1))
             while is_day_off(cur):
-                cur = add_days(cur, 1)
+                cur = getdate(add_days(cur, 1))
             return cur
 
         for day in range(1, total_days + 1):

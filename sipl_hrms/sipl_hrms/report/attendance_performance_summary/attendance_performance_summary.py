@@ -68,12 +68,12 @@ def execute(filters=None):
     holiday_map = {str(h.holiday_date): ("W/O" if h.weekly_off else "H/D") for h in holidays}
 
     # Add all Sundays to holiday_map if not already present
-    scan_d = add_days(from_date, -15)
-    end_scan_d = add_days(to_date, 15)
+    scan_d = getdate(add_days(from_date, -15))
+    end_scan_d = getdate(add_days(to_date, 15))
     while scan_d <= end_scan_d:
         if scan_d.weekday() == 6:
             holiday_map[str(scan_d)] = "W/O"
-        scan_d = add_days(scan_d, 1)
+        scan_d = getdate(add_days(scan_d, 1))
 
     # Fetch active employees
     emp_filters = {"status": "Active"}
@@ -134,12 +134,12 @@ def execute(filters=None):
     )
 
     def find_working_days_around(target_date, h_map):
-        prev_d = add_days(target_date, -1)
+        prev_d = getdate(add_days(target_date, -1))
         while str(prev_d) in h_map or prev_d.weekday() == 6:
-            prev_d = add_days(prev_d, -1)
-        next_d = add_days(target_date, 1)
+            prev_d = getdate(add_days(prev_d, -1))
+        next_d = getdate(add_days(target_date, 1))
         while str(next_d) in h_map or next_d.weekday() == 6:
-            next_d = add_days(next_d, 1)
+            next_d = getdate(add_days(next_d, 1))
         return str(prev_d), str(next_d)
 
     def is_emp_qualified(emp_id, d_str):
