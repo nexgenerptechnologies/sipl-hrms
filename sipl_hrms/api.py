@@ -175,8 +175,36 @@ def receive_easytimepro_punch(*args, **kwargs):
             continue
 
         device_sn = item.get("TERMINAL_SN") or item.get("terminal_sn") or item.get("device_id") or "EasyTimePro"
-        punch_state = (item.get("PUNCH_STATE") or item.get("punch_state") or "").upper()
-        log_type = "IN" if "IN" in punch_state else ("OUT" if "OUT" in punch_state else "")
+        punch_state = str(item.get("PUNCH_STATE") or item.get("punch_state") or "").upper()
+        
+        log_type = ""
+        if "IN" in punch_state:
+            log_type = "IN"
+        elif "OUT" in punch_state:
+            log_type = "OUT"
+        else:
+            # Auto-determine IN or OUT based on previous punches today
+            att_date_str = str(punch_time).split(' ')[0]
+            prior_logs = frappe.get_all(
+                "Employee Checkin",
+                filters={
+                    "employee": emp_name,
+                    "time": ["between", [f"{att_date_str} 00:00:00", f"{att_date_str} 23:59:59"]],
+                    "docstatus": ["!=", 2]
+                },
+                fields=["time", "log_type"],
+                order_by="time desc",
+                limit=1
+            )
+            if not prior_logs:
+                log_type = "IN"
+            else:
+                last_l = prior_logs[0]
+                diff_sec = frappe.utils.time_diff_in_seconds(punch_time, last_l.time)
+                if diff_sec < 900:  # duplicate tap within 15 mins
+                    log_type = last_l.log_type or "IN"
+                else:
+                    log_type = "OUT" if (last_l.log_type == "IN") else "IN"
 
         # Check for existing checkin to avoid duplicates
         existing = frappe.db.exists("Employee Checkin", {
